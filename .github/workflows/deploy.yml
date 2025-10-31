@@ -70,7 +70,7 @@ jobs:
     - name: Deploy to EKS
       run: |
         # Update the image URIs in the deployment files
-        sed -i "s|123456789012.dkr.ecr.ap-south-1.amazonaws.com/my-backend:latest|$BACKEND_IMAGE_URI|g" k8s/backend-deployment.yaml
+        sed -i "s|145023139102.dkr.ecr.ap-south-1.amazonaws.com/my-backend:latest|$BACKEND_IMAGE_URI|g" k8s/backend-deployment.yaml
         # Apply the manifests
         kubectl apply -f k8s/backend-deployment.yaml
         kubectl apply -f k8s/backend-service.yaml
