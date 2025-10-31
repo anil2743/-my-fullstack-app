@@ -1,0 +1,76 @@
+name: Build and Deploy to EKS
+
+on:
+  push:
+    branches: [ master ]
+
+env:
+  AWS_REGION: ap-south-1
+  EKS_CLUSTER_NAME: my-fullstack-cluster
+  ECR_REPOSITORY_FRONTEND: my-frontend
+  ECR_REPOSITORY_BACKEND: my-backend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '16'
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Build and Push Frontend Docker Image
+      run: |
+        cd frontend
+        # Create ECR repository if it doesn't exist
+        aws ecr describe-repositories --repository-names $ECR_REPOSITORY_FRONTEND || aws ecr create-repository --repository-name $ECR_REPOSITORY_FRONTEND
+        # Get the URI and tag
+        FRONTEND_IMAGE_URI=$(aws ecr describe-repositories --repository-names $ECR_REPOSITORY_FRONTEND --query "repositories[0].repositoryUri" --output text)
+        docker build -t $FRONTEND_IMAGE_URI:latest .
+        docker push $FRONTEND_IMAGE_URI:latest
+        echo "FRONTEND_IMAGE_URI=$FRONTEND_IMAGE_URI:latest" >> $GITHUB_ENV
+
+    - name: Build and Push Backend Docker Image
+      run: |
+        cd backend
+        # Create ECR repository if it doesn't exist
+        aws ecr describe-repositories --repository-names $ECR_REPOSITORY_BACKEND || aws ecr create-repository --repository-name $ECR_REPOSITORY_BACKEND
+        # Get the URI and tag
+        BACKEND_IMAGE_URI=$(aws ecr describe-repositories --repository-names $ECR_REPOSITORY_BACKEND --query "repositories[0].repositoryUri" --output text)
+        # Build the Spring Boot app
+        mvn clean package -DskipTests
+        docker build -t $BACKEND_IMAGE_URI:latest .
+        docker push $BACKEND_IMAGE_URI:latest
+        echo "BACKEND_IMAGE_URI=$BACKEND_IMAGE_URI:latest" >> $GITHUB_ENV
+
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_NAME
+
+    - name: Deploy to EKS
+      run: |
+        # Update the image URIs in the deployment files
+        sed -i "s|123456789012.dkr.ecr.ap-south-1.amazonaws.com/my-backend:latest|$BACKEND_IMAGE_URI|g" k8s/backend-deployment.yaml
+        # Apply the manifests
+        kubectl apply -f k8s/backend-deployment.yaml
+        kubectl apply -f k8s/backend-service.yaml

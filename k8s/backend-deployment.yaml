@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      - name: backend
+        image: 145023139102.dkr.ecr.ap-south-1.amazonaws.com/my-backend:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DB_URL
+          value: "jdbc:mysql://65.1.231.237:3306/bankingdb"
+        - name: DB_USERNAME
+          value: "root"
+        - name: DB_PASSWORD
+          value: "Anilp@2024"
+        - name: AES_KEY
+          value: "MySuperSecretKey"
+        - name: JWT_SECRET
+          value: "mySecretKeyWhichIsAtLeast256BitsLongForHS256Algorithm"
+        - name: ENCRYPTION_KEY
+          value: "MySecretKey12345"
