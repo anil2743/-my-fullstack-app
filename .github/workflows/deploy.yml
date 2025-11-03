@@ -52,11 +52,13 @@ jobs:
         echo "::set-output name=uri::$BACKEND_IMAGE_URI"
 
     - name: Build and Push Frontend Docker Image
-      run: |
-        FRONTEND_IMAGE_URI="${{ steps.ecr-frontend.outputs.uri }}"
-        cd frontend
-        docker build -t $FRONTEND_IMAGE_URI:latest .
-        docker push $FRONTEND_IMAGE_URI:latest
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        push: true
+        tags: ${{ steps.ecr-frontend.outputs.uri }}:latest
+        platforms: linux/amd64
+        no-cache: true
 
     - name: Build Backend JAR
       run: |
@@ -64,11 +66,13 @@ jobs:
         mvn clean package -DskipTests
 
     - name: Build and Push Backend Docker Image
-      run: |
-        BACKEND_IMAGE_URI="${{ steps.ecr-backend.outputs.uri }}"
-        cd backend
-        docker build -t $BACKEND_IMAGE_URI:latest .
-        docker push $BACKEND_IMAGE_URI:latest
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        push: true
+        tags: ${{ steps.ecr-backend.outputs.uri }}:latest
+        platforms: linux/amd64
+        no-cache: true
 
     - name: Update kubeconfig
       run: |
