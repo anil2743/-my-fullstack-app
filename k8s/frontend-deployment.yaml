@@ -15,6 +15,6 @@ spec:
       containers:
       - name: frontend
         image: 145023139102.dkr.ecr.ap-south-1.amazonaws.com/my-frontend:latest
+        imagePullPolicy: Always  # ADD THIS LINE: Forces pull latest image on restart
         ports:
         - containerPort: 80
-        # No need for environment variables since we're using relative paths
