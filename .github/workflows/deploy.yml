@@ -37,56 +37,43 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Login to Amazon ECR
+      id: login-ecr
       uses: aws-actions/amazon-ecr-login@v1
 
-    - name: Debug frontend directory
+    - name: Get ECR Frontend URI
+      id: ecr-frontend
       run: |
-        echo "Checking frontend directory contents:"
-        ls -la frontend/
-        echo "Checking if Dockerfile exists:"
-        if [ -f frontend/Dockerfile ]; then
-          echo "Dockerfile exists"
-        else
-          echo "Dockerfile does not exist"
-        fi
+        FRONTEND_IMAGE_URI=$(aws ecr describe-repositories --repository-names $ECR_REPOSITORY_FRONTEND --query "repositories[0].repositoryUri" --output text)
+        echo "::set-output name=uri::$FRONTEND_IMAGE_URI"
+
+    - name: Get ECR Backend URI
+      id: ecr-backend
+      run: |
+        BACKEND_IMAGE_URI=$(aws ecr describe-repositories --repository-names $ECR_REPOSITORY_BACKEND --query "repositories[0].repositoryUri" --output text)
+        echo "::set-output name=uri::$BACKEND_IMAGE_URI"
 
     - name: Build and Push Frontend Docker Image
-      run: |
-        cd frontend
-        # Create ECR repository if it doesn't exist
-        aws ecr describe-repositories --repository-names $ECR_REPOSITORY_FRONTEND || aws ecr create-repository --repository-name $ECR_REPOSITORY_FRONTEND
-        # Get the URI and tag
-        FRONTEND_IMAGE_URI=$(aws ecr describe-repositories --repository-names $ECR_REPOSITORY_FRONTEND --query "repositories[0].repositoryUri" --output text)
-        
-        # Enable BuildKit
-        export DOCKER_BUILDKIT=1
-        
-        # Build with verbose output
-        docker build --no-cache --progress=plain -t $FRONTEND_IMAGE_URI:latest .
-        
-        # Push the image
-        docker push $FRONTEND_IMAGE_URI:latest
-        echo "FRONTEND_IMAGE_URI=$FRONTEND_IMAGE_URI:latest" >> $GITHUB_ENV
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        push: true
+        tags: ${{ steps.ecr-frontend.outputs.uri }}:latest
+        platforms: linux/amd64
+        no-cache: true
 
-    - name: Build and Push Backend Docker Image
+    - name: Build Backend JAR
       run: |
         cd backend
-        # Create ECR repository if it doesn't exist
-        aws ecr describe-repositories --repository-names $ECR_REPOSITORY_BACKEND || aws ecr create-repository --repository-name $ECR_REPOSITORY_BACKEND
-        # Get the URI and tag
-        BACKEND_IMAGE_URI=$(aws ecr describe-repositories --repository-names $ECR_REPOSITORY_BACKEND --query "repositories[0].repositoryUri" --output text)
-        # Build the Spring Boot app
         mvn clean package -DskipTests
-        
-        # Enable BuildKit
-        export DOCKER_BUILDKIT=1
-        
-        # Build with verbose output
-        docker build --no-cache --progress=plain -t $BACKEND_IMAGE_URI:latest .
-        
-        # Push the image
-        docker push $BACKEND_IMAGE_URI:latest
-        echo "BACKEND_IMAGE_URI=$BACKEND_IMAGE_URI:latest" >> $GITHUB_ENV
+
+    - name: Build and Push Backend Docker Image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        push: true
+        tags: ${{ steps.ecr-backend.outputs.uri }}:latest
+        platforms: linux/amd64
+        no-cache: true
 
     - name: Update kubeconfig
       run: |
@@ -95,8 +82,8 @@ jobs:
     - name: Deploy to EKS
       run: |
         # Update the image URIs in the deployment files
-        sed -i "s|145023139102.dkr.ecr.ap-south-1.amazonaws.com/my-backend:latest|$BACKEND_IMAGE_URI|g" k8s/backend-deployment.yaml
-        sed -i "s|145023139102.dkr.ecr.ap-south-1.amazonaws.com/my-frontend:latest|$FRONTEND_IMAGE_URI|g" k8s/frontend-deployment.yaml
+        sed -i "s|145023139102.dkr.ecr.ap-south-1.amazonaws.com/my-backend:latest|${{ steps.ecr-backend.outputs.uri }}:latest|g" k8s/backend-deployment.yaml
+        sed -i "s|145023139102.dkr.ecr.ap-south-1.amazonaws.com/my-frontend:latest|${{ steps.ecr-frontend.outputs.uri }}:latest|g" k8s/frontend-deployment.yaml
         # Apply the manifests
         kubectl apply -f k8s/backend-deployment.yaml
         kubectl apply -f k8s/backend-service.yaml
