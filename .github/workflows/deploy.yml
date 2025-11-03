@@ -1,22 +1,29 @@
 name: Build and Deploy to EKS
-
 on:
   push:
     branches: [ master ]
-
 env:
   AWS_REGION: ap-south-1
   EKS_CLUSTER_NAME: my-fullstack-cluster
   ECR_REPOSITORY_FRONTEND: my-frontend
   ECR_REPOSITORY_BACKEND: my-backend
-
 jobs:
   deploy:
-    runs-on: ubuntu-latest  # Changed from ubuntu-20.04 to ubuntu-latest
-
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '16'
+
+    - name: Set up Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v2
@@ -31,20 +38,22 @@ jobs:
     - name: Get ECR Frontend URI
       id: ecr-frontend
       run: |
-        FRONTEND_IMAGE_URI=$(aws ecr describe-repositories --repository-names $ECR_REPOSITORY_FRONTEND --query "repositories[0].repositoryUri" --output text)
-        echo "::set-output name=uri::$FRONTEND_IMAGE_URI"
+        FRONTEND_IMAGE_URI=$(aws ecr describe-repositories --repository-names ${{ env.ECR_REPOSITORY_FRONTEND }} --query "repositories[0].repositoryUri" --output text)
+        echo "uri=$FRONTEND_IMAGE_URI" >> $GITHUB_OUTPUT
 
     - name: Get ECR Backend URI
       id: ecr-backend
       run: |
-        BACKEND_IMAGE_URI=$(aws ecr describe-repositories --repository-names $ECR_REPOSITORY_BACKEND --query "repositories[0].repositoryUri" --output text)
-        echo "::set-output name=uri::$BACKEND_IMAGE_URI"
+        BACKEND_IMAGE_URI=$(aws ecr describe-repositories --repository-names ${{ env.ECR_REPOSITORY_BACKEND }} --query "repositories[0].repositoryUri" --output text)
+        echo "uri=$BACKEND_IMAGE_URI" >> $GITHUB_OUTPUT
 
     - name: Build and Push Frontend Docker Image
+      env:
+        DOCKER_BUILDKIT: 0
       run: |
         FRONTEND_IMAGE_URI="${{ steps.ecr-frontend.outputs.uri }}"
         cd frontend
-        docker build -t $FRONTEND_IMAGE_URI:latest .
+        docker build --platform=linux/amd64 -t $FRONTEND_IMAGE_URI:latest .
         docker push $FRONTEND_IMAGE_URI:latest
 
     - name: Build Backend JAR
@@ -53,19 +62,21 @@ jobs:
         mvn clean package -DskipTests
 
     - name: Build and Push Backend Docker Image
+      env:
+        DOCKER_BUILDKIT: 0
       run: |
         BACKEND_IMAGE_URI="${{ steps.ecr-backend.outputs.uri }}"
         cd backend
-        docker build -t $BACKEND_IMAGE_URI:latest .
+        docker build --platform=linux/amd64 -t $BACKEND_IMAGE_URI:latest .
         docker push $BACKEND_IMAGE_URI:latest
 
     - name: Update kubeconfig
       run: |
-        aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_NAME
+        aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
 
     - name: Deploy to EKS
       run: |
-        # Update the image URIs in the deployment files
+        # Update the image URIs in the deployment files (update hardcoded account ID if needed)
         sed -i "s|145023139102.dkr.ecr.ap-south-1.amazonaws.com/my-backend:latest|${{ steps.ecr-backend.outputs.uri }}:latest|g" k8s/backend-deployment.yaml
         sed -i "s|145023139102.dkr.ecr.ap-south-1.amazonaws.com/my-frontend:latest|${{ steps.ecr-frontend.outputs.uri }}:latest|g" k8s/frontend-deployment.yaml
         # Apply the manifests

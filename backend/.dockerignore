@@ -5,6 +5,7 @@ build/
 # Logs
 *.log
 *.tmp
+.mvn
 
 # IDE files
 .vscode/
