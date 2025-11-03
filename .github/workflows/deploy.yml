@@ -51,13 +51,14 @@ jobs:
         BACKEND_IMAGE_URI=$(aws ecr describe-repositories --repository-names $ECR_REPOSITORY_BACKEND --query "repositories[0].repositoryUri" --output text)
         echo "::set-output name=uri::$BACKEND_IMAGE_URI"
 
-    - name: Build and Push Frontend Docker Image
+    - name: Push Pre-built Frontend Docker Image
       run: |
-        cd frontend
         FRONTEND_IMAGE_URI="${{ steps.ecr-frontend.outputs.uri }}"
-        echo "Building Docker image..."
-        docker build -t $FRONTEND_IMAGE_URI:latest .
-        echo "Pushing Docker image..."
+        # Pull a pre-built nginx image
+        docker pull nginx:alpine
+        # Tag it for ECR
+        docker tag nginx:alpine $FRONTEND_IMAGE_URI:latest
+        # Push to ECR
         docker push $FRONTEND_IMAGE_URI:latest
 
     - name: Build Backend JAR
