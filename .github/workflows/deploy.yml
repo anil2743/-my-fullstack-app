@@ -81,6 +81,30 @@ jobs:
         kubectl apply -f k8s/backend-service.yaml
         kubectl apply -f k8s/frontend-deployment.yaml
         kubectl apply -f k8s/frontend-service.yaml
-        # Verify deployment
+
+    - name: Verify deployment
+      run: |
         kubectl rollout status deployment/backend-deployment
         kubectl rollout status deployment/frontend-deployment
+
+    - name: Health check
+      run: |
+        # Wait for services to be ready
+        sleep 30
+        
+        # Run a curl pod to test services
+        kubectl run --rm -i --restart=Never --image=curlimages/curl curl-pod -- sh -c "
+          # Test backend health endpoint
+          echo 'Testing backend health endpoint...'
+          curl -f http://backend-service:8080/api/health || exit 1
+          
+          # Test frontend
+          echo 'Testing frontend...'
+          curl -f http://frontend-service || exit 1
+          
+          # Test API through frontend proxy
+          echo 'Testing API through frontend proxy...'
+          curl -f http://frontend-service/api/health || exit 1
+          
+          echo 'All health checks passed!'
+        "
