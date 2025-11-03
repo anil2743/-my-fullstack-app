@@ -17,6 +17,4 @@ spec:
         image: 145023139102.dkr.ecr.ap-south-1.amazonaws.com/my-frontend:latest
         ports:
         - containerPort: 80
-        env:
-        - name: REACT_APP_API_URL
-          value: "http://backend-service:8080"
+        # No need for environment variables since we're using relative paths
