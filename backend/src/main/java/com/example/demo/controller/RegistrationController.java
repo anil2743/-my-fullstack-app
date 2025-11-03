@@ -3,8 +3,11 @@ package com.example.demo.controller;
 import com.example.demo.dto.*;
 import com.example.demo.entity.MainUser;
 import com.example.demo.service.RegistrationService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -14,28 +17,45 @@ import java.util.Map;
 @RequestMapping("/api/registration")
 public class RegistrationController {
 
+    private static final Logger logger = LoggerFactory.getLogger(RegistrationController.class);
+
     @Autowired
     private RegistrationService registrationService;
 
+    // NEW: Add this for /check-pan (fixes 404)
+    @PostMapping("/check-pan")
+    public ResponseEntity<?> checkPan(@RequestBody Map<String, String> request) {
+        try {
+            String pan = request.get("pan");
+            if (pan == null || pan.trim().isEmpty() || !pan.matches("[A-Z]{5}\\d{4}[A-Z]{1}")) {
+                return ResponseEntity.badRequest().body(Map.of("valid", false, "message", "Invalid PAN format"));
+            }
+            boolean exists = registrationService.isPanAlreadyRegistered(pan);
+            return ResponseEntity.ok(Map.of("valid", true, "exists", exists));
+        } catch (Exception e) {
+            logger.error("Error checking PAN: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(Map.of("valid", false, "message", "Error checking PAN"));
+        }
+    }
+
     @PostMapping("/personal-details")
-    public ResponseEntity<?> savePersonalDetails(@RequestBody PersonalDetailsDto personalDetailsDto, @RequestParam(required = false) Long userId) {
+    public ResponseEntity<?> savePersonalDetails(@RequestBody @Validated PersonalDetailsDto personalDetailsDto, @RequestParam(required = false) Long userId) {
         try {
             Long savedUserId;
             if (userId != null) {
-                // Update existing user
                 savedUserId = registrationService.savePersonalDetails(personalDetailsDto, userId);
             } else {
-                // Create new user
                 savedUserId = registrationService.savePersonalDetails(personalDetailsDto);
             }
             return ResponseEntity.ok(savedUserId);
         } catch (RuntimeException e) {
+            logger.error("Runtime error saving personal details: {}", e.getMessage());
             if (e.getMessage().contains("already registered")) {
                 return ResponseEntity.status(409).body(e.getMessage()); // 409 Conflict
             }
             return ResponseEntity.status(400).body(e.getMessage());
         } catch (Exception e) {
-            // Handle database constraint violations
+            logger.error("Error saving personal details: {}", e.getMessage(), e);
             if (e.getCause() != null && e.getCause().getMessage().contains("Duplicate entry")) {
                 return ResponseEntity.status(409).body("PAN already registered. Please use a different PAN or contact support.");
             }
@@ -52,6 +72,7 @@ public class RegistrationController {
             }
             return ResponseEntity.notFound().build();
         } catch (Exception e) {
+            logger.error("Error fetching personal details: {}", e.getMessage());
             return ResponseEntity.status(500).body("Error fetching personal details");
         }
     }
@@ -97,16 +118,18 @@ public class RegistrationController {
     }
 
     @PostMapping("/contact-details")
-    public ResponseEntity<?> saveContactDetails(@RequestBody ContactDetailsDto contactDetailsDto, @RequestParam Long userId) {
+    public ResponseEntity<?> saveContactDetails(@RequestBody @Validated ContactDetailsDto contactDetailsDto, @RequestParam Long userId) {
         try {
             Long savedUserId = registrationService.saveContactDetails(contactDetailsDto, userId);
             return ResponseEntity.ok(savedUserId);
         } catch (RuntimeException e) {
+            logger.error("Runtime error saving contact details: {}", e.getMessage());
             if (e.getMessage().contains("already registered")) {
-                return ResponseEntity.status(409).body(e.getMessage());
+                return ResponseEntity.status(409).body(e.getMessage()); // FIXED: 409 for duplicates instead of 400
             }
-            return ResponseEntity.status(400).body(e.getMessage());
+            return ResponseEntity.status(400).body(e.getMessage()); // Keep 400 for other validation
         } catch (Exception e) {
+            logger.error("Error saving contact details: {}", e.getMessage(), e);
             return ResponseEntity.status(500).body("Error saving contact details. Please try again.");
         }
     }
@@ -120,21 +143,24 @@ public class RegistrationController {
             }
             return ResponseEntity.notFound().build();
         } catch (Exception e) {
+            logger.error("Error fetching contact details: {}", e.getMessage());
             return ResponseEntity.status(500).body("Error fetching contact details");
         }
     }
 
     @PostMapping("/bank-tax-details")
-    public ResponseEntity<?> saveBankTaxDetails(@RequestBody BankTaxDetailsDto bankTaxDetailsDto, @RequestParam Long userId) {
+    public ResponseEntity<?> saveBankTaxDetails(@RequestBody @Validated BankTaxDetailsDto bankTaxDetailsDto, @RequestParam Long userId) {
         try {
             Long savedUserId = registrationService.saveBankTaxDetails(bankTaxDetailsDto, userId);
             return ResponseEntity.ok(savedUserId);
         } catch (RuntimeException e) {
+            logger.error("Runtime error saving bank tax details: {}", e.getMessage());
             if (e.getMessage().contains("already registered")) {
                 return ResponseEntity.status(409).body(e.getMessage());
             }
             return ResponseEntity.status(400).body(e.getMessage());
         } catch (Exception e) {
+            logger.error("Error saving bank tax details: {}", e.getMessage(), e);
             return ResponseEntity.status(500).body("Error saving bank tax details. Please try again.");
         }
     }
@@ -148,6 +174,7 @@ public class RegistrationController {
             }
             return ResponseEntity.notFound().build();
         } catch (Exception e) {
+            logger.error("Error fetching bank tax details: {}", e.getMessage());
             return ResponseEntity.status(500).body("Error fetching bank tax details");
         }
     }
@@ -167,6 +194,7 @@ public class RegistrationController {
             }
             return ResponseEntity.notFound().build();
         } catch (Exception e) {
+            logger.error("Error fetching scheme selection: {}", e.getMessage());
             return ResponseEntity.status(500).body("Error fetching scheme selection");
         }
     }
@@ -186,6 +214,7 @@ public class RegistrationController {
             }
             return ResponseEntity.notFound().build();
         } catch (Exception e) {
+            logger.error("Error fetching nominee details: {}", e.getMessage());
             return ResponseEntity.status(500).body("Error fetching nominee details");
         }
     }
@@ -207,6 +236,7 @@ public class RegistrationController {
             }
             return ResponseEntity.notFound().build();
         } catch (Exception e) {
+            logger.error("Error fetching upload documents: {}", e.getMessage());
             return ResponseEntity.status(500).body("Error fetching upload documents");
         }
     }
@@ -223,6 +253,7 @@ public class RegistrationController {
             }
             return ResponseEntity.notFound().build();
         } catch (Exception e) {
+            logger.error("Error fetching user status: {}", e.getMessage());
             return ResponseEntity.status(500).body("Error fetching user status");
         }
     }
