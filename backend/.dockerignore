@@ -1,0 +1,33 @@
+# Maven / Gradle build output
+target/
+build/
+
+# Logs
+*.log
+*.tmp
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+*.classpath
+*.project
+*.settings/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git and docs
+.git/
+.gitignore
+README.md
+
+# Docker files
+Dockerfile
+docker-compose.yml
+
+# Environment and sensitive files
+.env
+application-*.properties
+application-*.yml
