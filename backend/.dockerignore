@@ -1,5 +1,4 @@
 # Maven / Gradle build output
-target/
 build/
 
 # Logs
