@@ -12,7 +12,7 @@ env:
 
 jobs:
   deploy:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest  # Changed from ubuntu-20.04 to ubuntu-latest
 
     steps:
     - name: Checkout code
