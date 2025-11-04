@@ -15,7 +15,7 @@ spec:
       containers:
       - name: backend
         image: 145023139102.dkr.ecr.ap-south-1.amazonaws.com/my-backend:latest
-        imagePullPolicy: Always  # ADD THIS LINE TO ENSURE LATEST IMAGE IS PULLED
+        imagePullPolicy: Always
         ports:
         - containerPort: 8080
         env:
@@ -31,3 +31,9 @@ spec:
           value: "mySecretKeyWhichIsAtLeast256BitsLongForHS256Algorithm"
         - name: ENCRYPTION_KEY
           value: "MySecretKey12345"
+
+        resources:
+          requests:
+            cpu: "100m"
+          limits:
+            cpu: "500m"
