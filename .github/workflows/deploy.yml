@@ -81,6 +81,9 @@ jobs:
         kubectl apply -f k8s/backend-service.yaml
         kubectl apply -f k8s/frontend-deployment.yaml
         kubectl apply -f k8s/frontend-service.yaml
+        # Apply HPA manifests
+        kubectl apply -f k8s/backend-hpa.yaml
+        kubectl apply -f k8s/frontend-hpa.yaml
 
     - name: Verify deployment
       run: |
