@@ -1,4 +1,4 @@
-apiVersion: autoscaling/v2
+apiVersion: autoscaling/v1
 kind: HorizontalPod Autoscaler
 metadata:
   name: backend-hpa

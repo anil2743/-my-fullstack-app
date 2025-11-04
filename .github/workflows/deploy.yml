@@ -73,7 +73,14 @@ jobs:
 
     - name: Install Metrics-Server
       run: |
+        # Check if Metrics Server is already installed
+        if kubectl get deployment metrics-server -n kube-system > /dev/null 2>&1; then
+          echo "Metrics Server already installed, upgrading..."
+          kubectl delete -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml --ignore-not-found=true
+        fi
+        
         # Install Metrics Server
+        echo "Installing Metrics Server..."
         kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
         
         # Wait for Metrics Server to be ready
