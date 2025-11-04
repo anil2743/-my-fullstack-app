@@ -15,6 +15,6 @@ spec:
       containers:
       - name: frontend
         image: 145023139102.dkr.ecr.ap-south-1.amazonaws.com/my-frontend:latest
-        imagePullPolicy: Always  # This is already present in
+        imagePullPolicy: Always  # This is already present in deployment
         ports:
         - containerPort: 80
