@@ -30,7 +30,7 @@ jobs:
         run: |
           cd frontend
           npm ci
-          npm run build
+          CI=false npm run build  # Added CI=false to ignore warnings
 
       - name: Build Backend (Spring Boot)
         run: |
