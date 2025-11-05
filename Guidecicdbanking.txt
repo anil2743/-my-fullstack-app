@@ -1,0 +1,319 @@
+### Complete Troubleshooting Guide: Deploying Your Fullstack Banking App to EKS
+
+Congratulations on getting it live! Below is a **complete, chronological step-by-step guide** summarizing the entire process from your initial prompt (Docker build failures) to the final success (registration saving data to MySQL). I've structured it as phases with:
+- **Error Identified**: What went wrong.
+- **Root Cause**: Why it happened.
+- **Fix Steps**: Exact commands/files changed.
+- **Verification**: How to check it worked.
+
+This is self-contained for saving locally—copy-paste into a doc. Each phase builds on the previous, showing how one error led to the next (e.g., build success → deployment → DB connect → CORS → endpoint logic). Total time: ~2-3 hours across iterations.
+
+#### Phase 1: Docker Build Failures (Initial Push Errors)
+**Error Identified**: "failed to solve: Internal: stream terminated by RST_STREAM with error code: INTERNAL_ERROR" on frontend/backend builds; "unknown instruction:   FROM" (BOM); "COPY failed: no source files" for JAR; 404 for static files.
+
+**Root Cause**: CRLF line endings/BOM in Dockerfiles (Windows editor issue); unexpanded glob in backend Dockerfile ARG; .dockerignore excluding target/; missing nginx.config COPY in frontend Dockerfile.
+
+**Fix Steps**:
+1. **Line Endings/BOM Fix**:
+   - Open `frontend/Dockerfile` and `backend/Dockerfile` in VS Code.
+   - Set LF (bottom status bar: CRLF → LF); Encoding: UTF-8 (Command Palette > Change File Encoding > UTF-8).
+   - Backend Dockerfile: Replace `ARG JAR_FILE=target/*.jar; COPY ${JAR_FILE} app.jar` with `COPY target/*.jar app.jar`.
+   - Frontend Dockerfile: Add `COPY --from=build /app/nginx.config /etc/nginx/conf.d/default.conf` after COPY build.
+
+2. **.dockerignore Updates**:
+   - `frontend/.dockerignore`:
+     ```
+     node_modules
+     .git
+     *.log
+     .env*
+     !nginx.config  # Ensure config included
+     ```
+   - `backend/.dockerignore`:
+     ```
+     .git
+     *.log
+     .mvn
+     .idea
+     .vscode
+     # No 'target' exclusion
+     ```
+
+3. **Workflow Updates** (`.github/workflows/deploy.yml`):
+   - Node version: `'18'`.
+   - Remove `env: DOCKER_BUILDKIT: 0` from build steps.
+   - Add `--platform=linux/amd64` to docker build.
+
+4. **Commit/Push**:
+   ```
+   git add .
+   git commit -m "Fix Dockerfiles, .dockerignore, and workflow"
+   git push origin master
+   ```
+   - Workflow runs; builds succeed.
+
+**Verification**:
+- GitHub Actions: Green checks on builds/pushes to ECR.
+- Local: `cd frontend; docker build -t test .; docker run -p 8080:80 test; curl http://localhost:8080` → React HTML (no welcome).
+- Local backend: `cd backend; mvn clean package; docker build -t test .; docker run -p 8080:8080 test; curl http://localhost:8080` → 200 OK.
+
+### Phase 2: EKS Deployment & Initial Access
+**Error Identified**: No external IP (pending ELB); kubeconfig not set locally.
+
+**Root Cause**: AWS ELB provisioning delay; local kubectl not configured for EKS.
+
+**Fix Steps**:
+1. **Local Kubeconfig**:
+   ```
+   aws eks update-kubeconfig --region ap-south-1 --name my-fullstack-cluster
+   ```
+2. **Get ELB URL**:
+   ```
+   kubectl get svc frontend-service  # EXTERNAL-IP: a9d1bb6c70a734cdebee73e4e4c8cac7-555423806.ap-south-1.elb.amazonaws.com
+   ```
+
+**Verification**:
+- `kubectl get pods -l app=frontend/backend` → 2x Running/Ready 1/1.
+- Browser: `http://a9d1bb6c70a734cdebee73e4e4c8cac7-555423806.ap-south-1.elb.amazonaws.com` → Nginx welcome (expected; next phase).
+
+### Phase 3: Frontend Nginx Welcome & /api 404
+**Error Identified**: Browser shows "Welcome to nginx!" on /; 404 on /api (tries static file).
+
+**Root Cause**: Dockerfile missing COPY for `nginx.config` (overrides default conf for React SPA routing + /api proxy to backend).
+
+**Fix Steps**:
+1. **Frontend Dockerfile Update**:
+   ```
+   # Build stage
+   FROM node:18-alpine AS build
+   WORKDIR /app
+   COPY package*.json ./
+   RUN npm install
+   COPY . .
+   RUN npm run build
+
+   # Production stage
+   FROM nginx:alpine
+   COPY --from=build /app/build /usr/share/nginx/html
+   COPY --from=build /app/nginx.config /etc/nginx/conf.d/default.conf  # COPY config
+   EXPOSE 80
+   CMD ["nginx", "-g", "daemon off;"]
+   ```
+2. **Ensure nginx.config in frontend/**:
+   ```
+   server {
+       listen 80;
+       server_name localhost;
+       location / {
+           root /usr/share/nginx/html;
+           index index.html index.htm;
+           try_files $uri $uri/ /index.html;
+       }
+       location /api {
+           proxy_pass http://backend-service:8080;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+       }
+   }
+   ```
+3. **Commit/Push**:
+   ```
+   git add frontend/Dockerfile frontend/nginx.config
+   git commit -m "Add nginx.config COPY for React serving and API proxy"
+   git push origin master
+   ```
+4. **Restart Frontend**:
+   ```
+   kubectl rollout restart deployment/frontend-deployment
+   kubectl rollout status deployment/frontend-deployment
+   ```
+
+**Verification**:
+- `kubectl exec -it <frontend-pod> -- sh -c "ls /usr/share/nginx/html; cat /etc/nginx/conf.d/default.conf"` → index.html listed; config has try_files and proxy_pass.
+- Browser: URL → React app loads (index.html); /api → Backend response (200 or endpoint error, not 404).
+
+### Phase 4: Backend CrashLoopBackOff (DB Connection Refused)
+**Error Identified**: Pods 0/1 Error/CrashLoopBackOff; logs: "Communications link failure" / "Connection refused".
+
+**Root Cause**: EKS VPC can't reach EC2 MySQL IP (65.1.231.237:3306)—security groups (SG) block inbound, bind-address limited to localhost.
+
+**Fix Steps**:
+1. **Get SGs**:
+   ```
+   EC2_SG_ID=$(aws ec2 describe-instances --instance-ids $(curl -s http://169.254.169.254/latest/meta-data/instance-id) --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' --output text)
+   EKS_SG_ID=$(aws eks describe-cluster --name my-fullstack-cluster --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' --output text)
+   ```
+
+2. **Allow EKS to MySQL** (Public fallback, since different VPCs):
+   ```
+   aws ec2 authorize-security-group-ingress --group-id $EC2_SG_ID --protocol tcp --port 3306 --cidr 0.0.0.0/0 --region ap-south-1
+   ```
+
+3. **Bind-Address**:
+   ```
+   sudo nano /etc/mysql/mysql.conf.d/mysqld.cnf
+   # Set bind-address = 0.0.0.0
+   sudo systemctl restart mysql
+   sudo systemctl status mysql
+   ```
+
+4. **Test Connectivity**:
+   ```
+   kubectl run mysql-test --image=alpine --rm -it --restart=Never -- sh
+   # Inside: apk add netcat-openbsd; nc -zv 65.1.231.237 3306 → "succeeded!"
+   exit
+   ```
+
+5. **MySQL Permissions**:
+   ```
+   mysql -u root -p  # "Anilp@2024"
+   # Inside:
+   CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED BY 'Anilp@2024';
+   GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;
+   FLUSH PRIVILEGES;
+   exit
+   sudo systemctl restart mysql
+   ```
+
+6. **Restart Backend**:
+   ```
+   kubectl rollout restart deployment/backend-deployment
+   kubectl rollout status deployment/backend-deployment
+   ```
+
+**Verification**:
+- `kubectl get pods -l app=backend` → Ready 1/1.
+- Logs: `kubectl logs -l app=backend --tail=10` → "Started BankingApplication" + "HikariPool-1 - Start completed" (no refused).
+- Curl: `kubectl port-forward svc/backend-service 8080:8080; curl http://localhost:8080/api` → 200.
+
+### Phase 5: CORS 500 on API Calls
+**Error Identified**: 500 "IllegalArgumentException: When allowCredentials is true, allowedOrigins cannot contain the special value \"*\"".
+
+**Root Cause**: CorsConfig.java uses `.allowedOrigins("*")` + `.allowCredentials(true)`—invalid for security (wildcard + credentials forbidden).
+
+**Fix Steps**:
+1. **Update CorsConfig.java**:
+   ```
+   registry.addMapping("/api/**")
+       .allowedOriginPatterns("*")  // Patterns allow wildcard with credentials
+       .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+       .allowedHeaders("*")
+       .allowCredentials(true);
+   ```
+
+2. **Commit/Push**:
+   ```
+   git add src/main/java/com/example/demo/config/CorsConfig.java
+   git commit -m "Fix CORS: allowedOriginPatterns with * and credentials"
+   git push origin master
+   ```
+
+3. **Restart Backend**:
+   ```
+   kubectl rollout restart deployment/backend-deployment
+   kubectl rollout status deployment/backend-deployment
+   ```
+
+**Verification**:
+- Curl: `curl -v -X POST http://localhost:8080/api/registration/check-pan -H "Content-Type: application/json" -d '{"pan":"ABCDE1234F"}'` → 200 (no 500, CORS headers present).
+- Browser: Console no CORS error; /api calls succeed.
+
+### Phase 6: 404 for /check-pan (Endpoint Missing)
+**Error Identified**: 404 "No static resource api/registration/check-pan" on POST.
+
+**Root Cause**: Backend controller missing `@PostMapping("/check-pan")`—Spring treats as static file (no route).
+
+**Fix Steps**:
+1. **Add to RegistrationController.java** (create if missing):
+   ```
+   @RestController
+   @RequestMapping("/api/registration")
+   public class RegistrationController {
+       @Autowired
+       private RegistrationService service;
+
+       @PostMapping("/check-pan")
+       public ResponseEntity<?> checkPan(@RequestBody PanRequestDto request) {
+           if (request.getPan() == null || !request.getPan().matches("[A-Z]{5}\\d{4}[A-Z]{1}")) {
+               return ResponseEntity.badRequest().body("{\"valid\": false, \"message\": \"Invalid PAN\"}");
+           }
+           boolean exists = service.isPanExists(request.getPan());
+           return ResponseEntity.ok("{\"valid\": true, \"exists\": " + exists + "}");
+       }
+
+       @PostMapping("/personal-details")
+       public ResponseEntity<?> savePersonalDetails(@RequestBody PersonalDetailsDto request) {
+           service.savePersonalDetails(request);
+           return ResponseEntity.ok("{\"success\": true, \"message\": \"Saved\"}");
+       }
+   }
+   ```
+   - Add DTOs/Repository/Service as in previous response (PanRequestDto, PersonalDetailsDto, RegistrationService, PersonalDetailsRepository).
+
+2. **Commit/Push**:
+   ```
+   git add src/main/java/com/example/demo/controller/RegistrationController.java src/main/java/com/example/demo/dto/*.java src/main/java/com/example/demo/service/RegistrationService.java src/main/java/com/example/demo/repository/PersonalDetailsRepository.java
+   git commit -m "Add RegistrationController and DTOs for /check-pan and /personal-details"
+   git push origin master
+   ```
+
+3. **Restart Backend**:
+   ```
+   kubectl rollout restart deployment/backend-deployment
+   kubectl rollout status deployment/backend-deployment
+   ```
+
+**Verification**:
+- Curl: `curl -v -X POST http://localhost:8080/api/registration/check-pan -H "Content-Type: application/json" -d '{"pan":"ABCDE1234F"}'` → 200 {"valid":true}.
+- DB: `mysql bankingdb -u root -p -e "SELECT * FROM personal_details;"` → New row after save.
+
+### Phase 7: Logging Parse Error (Startup Crash)
+**Error Identified**: "Failed to bind properties under 'logging.level.com.example.demo'" on startup; pods crash.
+
+**Root Cause**: Inline comments in `application.properties` (e.g., "DEBUG # App package") parsed as value, invalid LogLevel.
+
+**Fix Steps**:
+1. **Update application.properties** (remove inline # in values):
+   ```
+   logging.level.com.example.demo=DEBUG
+   logging.level.org.springframework.web=DEBUG
+   logging.level.org.hibernate.SQL=DEBUG
+   logging.level.org.hibernate.type.descriptor.sql.BasicBinder=TRACE
+
+   server.error.include-message=always
+   server.error.include-binding-errors=always
+   server.error.include-stacktrace=always
+   server.error.include-exception=true
+   ```
+
+2. **Commit/Push**:
+   ```
+   git add src/main/resources/application.properties
+   git commit -m "Fix logging properties (remove inline comments)"
+   git push origin master
+   ```
+
+3. **Restart Backend**:
+   ```
+   kubectl rollout restart deployment/backend-deployment
+   kubectl rollout status deployment/backend-deployment
+   ```
+
+**Verification**:
+- Logs: `kubectl logs -l app=backend --tail=10 | grep "Started"` → "Started BankingApplication" (no bind error).
+
+### Final Success: Registration Saves Data
+- Browser: URL → Registration → Submit → "Saved!" (no 500).
+- DB: Tables populated (`SELECT * FROM personal_details;` → new rows).
+- Logs: No errors on POSTs; queries logged (show-sql=true).
+
+### General Tips for Future Errors
+- **Build Issues**: Check line endings (VS Code LF/UTF-8), .dockerignore, Dockerfile COPY.
+- **Deployment**: `kubectl get pods -l app=...` for status; `rollout restart` for refresh.
+- **DB**: `nc -zv IP:3306` for connect; GRANT for perms; @NotNull for nulls.
+- **API 500/404**: Logs with debug; curl ?trace=true; CORS with allowedOriginPatterns("*").
+- **Save Empty Tables**: Check payload fields match DTO; clear TRUNCATE TABLE for duplicates.
+
+Save this guide—your app's robust now. Ping if new errors! 😊
