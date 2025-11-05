@@ -30,7 +30,7 @@ jobs:
         run: |
           cd frontend
           npm ci
-          CI=false npm run build  # Added CI=false to ignore warnings
+          CI=false npm run build
 
       - name: Build Backend (Spring Boot)
         run: |
@@ -71,7 +71,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "build-artifacts/*"
+          source: "build-artifacts"
           target: "/home/${{ secrets.EC2_USER }}/staging/"
 
       - name: Deploy on EC2 (staging)
@@ -88,15 +88,23 @@ jobs:
             JAR_FILE="app-staging.jar"
 
             echo "== Staging deploy start =="
+            # Debug: List the contents of the staging directory
+            echo "Contents of ~/staging:"
+            ls -la ~/staging
+            echo "Contents of ~/staging/build-artifacts:"
+            ls -la ~/staging/build-artifacts
+            echo "Contents of ~/staging/build-artifacts/frontend:"
+            ls -la ~/staging/build-artifacts/frontend
+
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
-            sudo cp -r ~/staging/frontend/build/* "$STAGING_DIR"/
+            sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Backend
             mkdir -p ~/staging/backend
-            cp ~/staging/backend/target/*.jar ~/staging/$JAR_FILE
+            cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
 
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
@@ -176,7 +184,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "build-artifacts/*"
+          source: "build-artifacts"
           target: "/home/${{ secrets.EC2_USER }}/app/"
 
       - name: Deploy on EC2 (prod)
@@ -192,15 +200,22 @@ jobs:
             JAR_FILE="app.jar"
 
             echo "== Production deploy start =="
+            # Debug: List the contents of the app directory
+            echo "Contents of ~/app:"
+            ls -la ~/app
+            echo "Contents of ~/app/build-artifacts:"
+            ls -la ~/app/build-artifacts
+            echo "Contents of ~/app/build-artifacts/frontend:"
+            ls -la ~/app/build-artifacts/frontend
+
             # Frontend
             sudo mkdir -p "$NGINX_ROOT"
             sudo rm -rf "$NGINX_ROOT"/*
-            sudo cp -r ~/app/frontend/build/* "$NGINX_ROOT"/
+            sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
             # Backend
-            mkdir -p ~/app
-            cp ~/app/backend/target/*.jar ~/app/$JAR_FILE
+            cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
 
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
