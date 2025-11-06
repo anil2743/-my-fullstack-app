@@ -151,9 +151,21 @@ jobs:
                 location / {
                     root $NGINX_ROOT;
                     try_files \$uri \$uri/ /index.html =404;
+                    index index.html;
                 }
                 location /api/ {
                     proxy_pass http://localhost:8080/api/;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_connect_timeout 30s;
+                    proxy_send_timeout 30s;
+                    proxy_read_timeout 30s;
+                }
+                
+                # Staging API
+                location /staging/api/ {
+                    proxy_pass http://localhost:8081/staging/api/;
                     proxy_set_header Host \$host;
                     proxy_set_header X-Real-IP \$remote_addr;
                     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -169,19 +181,12 @@ jobs:
                 
                 # Staging frontend
                 location /staging/ {
-                    root $NGINX_ROOT;
-                    try_files \$uri \$uri/ /staging/index.html =404;
+                    alias $STAGING_DIR/;
+                    try_files \$uri \$uri/ @staging-spa;
+                    index index.html;
                 }
-                
-                # Staging API
-                location /staging/api/ {
-                    proxy_pass http://localhost:8081/staging/api/;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                    proxy_connect_timeout 30s;
-                    proxy_send_timeout 30s;
-                    proxy_read_timeout 30s;
+                location @staging-spa {
+                    rewrite ^/staging/.*\$ /staging/index.html last;
                 }
             }
             EOF
@@ -352,9 +357,21 @@ jobs:
                 location / {
                     root $NGINX_ROOT;
                     try_files \$uri \$uri/ /index.html =404;
+                    index index.html;
                 }
                 location /api/ {
                     proxy_pass http://localhost:8080/api/;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_connect_timeout 30s;
+                    proxy_send_timeout 30s;
+                    proxy_read_timeout 30s;
+                }
+                
+                # Staging API
+                location /staging/api/ {
+                    proxy_pass http://localhost:8081/staging/api/;
                     proxy_set_header Host \$host;
                     proxy_set_header X-Real-IP \$remote_addr;
                     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -370,19 +387,12 @@ jobs:
                 
                 # Staging frontend
                 location /staging/ {
-                    root $NGINX_ROOT;
-                    try_files \$uri \$uri/ /staging/index.html =404;
+                    alias $STAGING_DIR/;
+                    try_files \$uri \$uri/ @staging-spa;
+                    index index.html;
                 }
-                
-                # Staging API
-                location /staging/api/ {
-                    proxy_pass http://localhost:8081/staging/api/;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                    proxy_connect_timeout 30s;
-                    proxy_send_timeout 30s;
-                    proxy_read_timeout 30s;
+                location @staging-spa {
+                    rewrite ^/staging/.*\$ /staging/index.html last;
                 }
             }
             EOF
