@@ -14,7 +14,8 @@ const STATE_OPTIONS = [
   { code: '29', label: 'Karnataka' },
   { code: '07', label: 'Delhi (NCT)' },
   { code: '33', label: 'Tamil Nadu' },
-  { code: '19', label: 'West Bengal' }
+  { code: '19', label: 'West Bengal' },
+  { code:  '20' label: 'Telangana'}
 ];
 
 const sanitizeDigits = value => value.replace(/\D/g, '');
