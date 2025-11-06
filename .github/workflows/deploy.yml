@@ -150,7 +150,7 @@ jobs:
                 # Production locations
                 location / {
                     root $NGINX_ROOT;
-                    try_files \$uri \$uri/ /index.html;
+                    try_files \$uri \$uri/ /index.html =404;
                 }
                 location /api/ {
                     proxy_pass http://localhost:8080/api/;
@@ -169,11 +169,8 @@ jobs:
                 
                 # Staging frontend
                 location /staging/ {
-                    alias $STAGING_DIR/;
-                    try_files \$uri \$uri/ @staging-fallback;
-                }
-                location @staging-fallback {
-                    rewrite ^ /staging/index.html last;
+                    root $NGINX_ROOT;
+                    try_files \$uri \$uri/ /staging/index.html =404;
                 }
                 
                 # Staging API
@@ -354,7 +351,7 @@ jobs:
                 # Production locations
                 location / {
                     root $NGINX_ROOT;
-                    try_files \$uri \$uri/ /index.html;
+                    try_files \$uri \$uri/ /index.html =404;
                 }
                 location /api/ {
                     proxy_pass http://localhost:8080/api/;
@@ -373,11 +370,8 @@ jobs:
                 
                 # Staging frontend
                 location /staging/ {
-                    alias $STAGING_DIR/;
-                    try_files \$uri \$uri/ @staging-fallback;
-                }
-                location @staging-fallback {
-                    rewrite ^ /staging/index.html last;
+                    root $NGINX_ROOT;
+                    try_files \$uri \$uri/ /staging/index.html =404;
                 }
                 
                 # Staging API
