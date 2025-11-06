@@ -136,7 +136,7 @@ jobs:
               sudo systemctl enable ${SPRING_SERVICE}
             fi
             
-            # Create staging-specific Nginx config
+            # Create staging-specific Nginx config with cache control headers
             sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
             server {
                 listen 80;
@@ -147,10 +147,15 @@ jobs:
                     return 301 /staging/;
                 }
                 
-                # Staging frontend
+                # Staging frontend with cache control
                 location /staging/ {
-                    root $STAGING_DIR;
-                    try_files \$uri \$uri/ /index.html;
+                    alias $STAGING_DIR/;
+                    try_files \$uri \$uri/ /staging/index.html;
+                    
+                    # Add cache control headers to prevent browser caching
+                    add_header Cache-Control "no-cache, no-store, must-revalidate";
+                    add_header Pragma "no-cache";
+                    add_header Expires "0";
                 }
                 
                 # Staging API
@@ -242,3 +247,5 @@ jobs:
             echo "Staging URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging/"
             echo "  Backend API: http://${{ secrets.EC2_HOST }}/staging/api"
+            echo ""
+            echo "IMPORTANT: If you still see a blank page, please clear your browser cache or do a hard refresh (Ctrl+F5)"
