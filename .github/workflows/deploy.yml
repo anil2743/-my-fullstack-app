@@ -31,12 +31,10 @@ jobs:
           cd frontend
           npm ci
           CI=false npm run build
-
       - name: Build Backend (Spring Boot)
         run: |
           cd backend
           mvn -B -q -DskipTests clean package
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -44,7 +42,6 @@ jobs:
           path: |
             frontend/build
             backend/target/*.jar
-
   deploy-staging:
     name: Deploy to STAGING EC2
     needs: build
@@ -86,7 +83,6 @@ jobs:
             STAGING_DIR="$NGINX_ROOT/staging"
             SPRING_SERVICE="springboot-staging"
             JAR_FILE="app-staging.jar"
-
             echo "== Staging deploy start =="
             # Debug: List the contents of the staging directory
             echo "Contents of ~/staging:"
@@ -95,7 +91,6 @@ jobs:
             ls -la ~/staging/build-artifacts
             echo "Contents of ~/staging/build-artifacts/frontend:"
             ls -la ~/staging/build-artifacts/frontend
-
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
@@ -105,14 +100,12 @@ jobs:
             # Backend
             mkdir -p ~/staging/backend
             cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
-
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
               sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
             [Unit]
             Description=Spring Boot (staging)
             After=network.target
-
             [Service]
             User=${{ secrets.EC2_USER }}
             WorkingDirectory=/home/${{ secrets.EC2_USER }}/staging
@@ -120,25 +113,21 @@ jobs:
             SuccessExitStatus=143
             Restart=always
             RestartSec=5
-
             [Install]
             WantedBy=multi-user.target
             EOF
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
             fi
-
             # Configure Nginx for staging
             sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
             server {
                 listen 80;
                 server_name _;
-
                 location /staging {
                     alias $STAGING_DIR;
                     try_files \$uri \$uri/ /staging/index.html;
                 }
-
                 location /staging/api {
                     proxy_pass http://localhost:8081/staging/api;
                     proxy_set_header Host \$host;
@@ -160,7 +149,6 @@ jobs:
             echo "Staging URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging"
             echo "  Backend API: http://${{ secrets.EC2_HOST }}/staging/api"
-
   deploy-production:
     name: Deploy to PRODUCTION EC2
     needs: build
@@ -198,7 +186,6 @@ jobs:
             NGINX_ROOT="/var/www/html"
             SPRING_SERVICE="springboot"
             JAR_FILE="app.jar"
-
             echo "== Production deploy start =="
             # Debug: List the contents of the app directory
             echo "Contents of ~/app:"
@@ -207,7 +194,6 @@ jobs:
             ls -la ~/app/build-artifacts
             echo "Contents of ~/app/build-artifacts/frontend:"
             ls -la ~/app/build-artifacts/frontend
-
             # Frontend
             sudo mkdir -p "$NGINX_ROOT"
             sudo rm -rf "$NGINX_ROOT"/*
@@ -216,14 +202,12 @@ jobs:
             
             # Backend
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
-
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
               sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
             [Unit]
             Description=Spring Boot (prod)
             After=network.target
-
             [Service]
             User=${{ secrets.EC2_USER }}
             WorkingDirectory=/home/${{ secrets.EC2_USER }}/app
@@ -231,25 +215,21 @@ jobs:
             SuccessExitStatus=143
             Restart=always
             RestartSec=5
-
             [Install]
             WantedBy=multi-user.target
             EOF
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
             fi
-
             # Configure Nginx for production
             sudo tee /etc/nginx/sites-available/production > /dev/null <<EOF
             server {
                 listen 80;
                 server_name _;
-
                 location / {
                     root $NGINX_ROOT;
                     try_files \$uri \$uri/ /index.html;
                 }
-
                 location /api {
                     proxy_pass http://localhost:8080/api;
                     proxy_set_header Host \$host;
@@ -268,7 +248,7 @@ jobs:
             if [ -L "/etc/nginx/sites-enabled/default" ]; then
               sudo rm /etc/nginx/sites-enabled/default
             fi
-            
+         
             sudo systemctl restart nginx
             sudo systemctl restart ${SPRING_SERVICE}
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
