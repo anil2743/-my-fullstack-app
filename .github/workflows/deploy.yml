@@ -187,12 +187,20 @@ jobs:
             sudo systemctl restart ${SPRING_SERVICE}
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
             
-            # Check if Spring Boot is listening on port 8081
+            # Check if Spring Boot is listening on port 8081 with retries
             echo "Checking if Spring Boot is listening on port 8081..."
-            sleep 10  # Give more time for Spring Boot to start
-            if ! ss -tlnp | grep :8081; then
-              echo "ERROR: Spring Boot is not listening on port 8081"
-              sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 30
+            for i in {1..10}; do
+              if ss -tlnp | grep :8081 > /dev/null; then
+                echo "Spring Boot is listening on port 8081"
+                break
+              else
+                echo "Port 8081 not ready yet (attempt $i/10), waiting..."
+                sleep 3
+              fi
+            done
+            if ! ss -tlnp | grep :8081 > /dev/null; then
+              echo "ERROR: Spring Boot is not listening on port 8081 after retries"
+              sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
               exit 1
             fi
             
