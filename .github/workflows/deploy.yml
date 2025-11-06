@@ -39,8 +39,14 @@ jobs:
 
       - name: Package artifacts
         run: |
+          # Frontend: Zip to save transfer time
+          cd frontend/build
+          zip -r ../build.zip .
+          cd ../..
           mkdir -p artifacts/frontend
-          cp -r frontend/build/* artifacts/frontend/
+          cp frontend/build.zip artifacts/frontend/
+
+          # Backend: Keep JAR as-is
           mkdir -p artifacts/backend
           cp backend/target/*.jar artifacts/backend/
 
@@ -78,23 +84,33 @@ jobs:
           ls -la ./artifacts/backend/
 
       - name: Copy to EC2 (staging)
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           source: "artifacts"
           target: "/home/${{ secrets.EC2_USER }}/staging/"
-          timeout: 60s
+          timeout: 2m
+          rm: true
 
-      - name: Deploy on EC2 (staging)
-        uses: appleboy/ssh-action@v0.1.7
+      - name: Verify SCP (staging)
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            set -e
+            ls -la /home/${{ secrets.EC2_USER }}/staging/artifacts/ || echo "Remote artifacts missing!"
+
+      - name: Deploy on EC2 (staging)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -euo pipefail
             NGINX_ROOT="/var/www/html"
             STAGING_DIR="$NGINX_ROOT/staging"
             SPRING_SERVICE="springboot-staging"
@@ -112,10 +128,15 @@ jobs:
             echo "Contents of $STAGING_HOME/artifacts/backend:"
             ls -la $STAGING_HOME/artifacts/backend
 
+            # Install unzip if needed
+            if ! command -v unzip &> /dev/null; then
+              sudo apt update && sudo apt install unzip -y
+            fi
+
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
-            sudo cp -r $STAGING_HOME/artifacts/frontend/* "$STAGING_DIR"/
+            unzip $STAGING_HOME/artifacts/frontend/build.zip -d "$STAGING_DIR"
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Backend
@@ -171,9 +192,9 @@ jobs:
             # Test Nginx configuration
             sudo nginx -t
             
-            # Restart services with error handling
-            sudo systemctl restart nginx || echo "Nginx restart failed"
-            sudo systemctl restart ${SPRING_SERVICE} || echo "Spring Boot restart failed"
+            # Restart services
+            sudo systemctl restart nginx
+            sudo systemctl restart ${SPRING_SERVICE}
             
             # Check service status
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 5
@@ -208,23 +229,33 @@ jobs:
           ls -la ./artifacts/backend/
 
       - name: Copy to EC2 (prod)
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           source: "artifacts"
           target: "/home/${{ secrets.EC2_USER }}/app/"
-          timeout: 60s
+          timeout: 2m
+          rm: true
 
-      - name: Deploy on EC2 (prod)
-        uses: appleboy/ssh-action@v0.1.7
+      - name: Verify SCP (prod)
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            set -e
+            ls -la /home/${{ secrets.EC2_USER }}/app/artifacts/ || echo "Remote artifacts missing!"
+
+      - name: Deploy on EC2 (prod)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -euo pipefail
             NGINX_ROOT="/var/www/html"
             SPRING_SERVICE="springboot"
             JAR_FILE="app.jar"
@@ -241,10 +272,15 @@ jobs:
             echo "Contents of $APP_HOME/artifacts/backend:"
             ls -la $APP_HOME/artifacts/backend
 
+            # Install unzip if needed
+            if ! command -v unzip &> /dev/null; then
+              sudo apt update && sudo apt install unzip -y
+            fi
+
             # Frontend
             sudo mkdir -p "$NGINX_ROOT"
             sudo rm -rf "$NGINX_ROOT"/*
-            sudo cp -r $APP_HOME/artifacts/frontend/* "$NGINX_ROOT"/
+            unzip $APP_HOME/artifacts/frontend/build.zip -d "$NGINX_ROOT"
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
             # Backend
@@ -305,9 +341,9 @@ jobs:
             # Test Nginx configuration
             sudo nginx -t
             
-            # Restart services with error handling
-            sudo systemctl restart nginx || echo "Nginx restart failed"
-            sudo systemctl restart ${SPRING_SERVICE} || echo "Spring Boot restart failed"
+            # Restart services
+            sudo systemctl restart nginx
+            sudo systemctl restart ${SPRING_SERVICE}
             
             # Check service status
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 5
