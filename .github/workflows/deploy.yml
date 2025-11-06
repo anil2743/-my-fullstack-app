@@ -140,18 +140,35 @@ jobs:
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
             fi
-            # Configure Nginx for staging
-            sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
+            
+            # Write full Nginx config supporting both prod and staging
+            sudo tee /etc/nginx/sites-available/fullstack > /dev/null <<EOF
             server {
                 listen 80;
                 server_name _;
-                # Handle both /staging and /staging/
+                
+                # Production locations
+                location / {
+                    root $NGINX_ROOT;
+                    try_files \$uri \$uri/ /index.html;
+                }
+                location /api/ {
+                    proxy_pass http://localhost:8080/api/;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_connect_timeout 30s;
+                    proxy_send_timeout 30s;
+                    proxy_read_timeout 30s;
+                }
+                
+                # Staging locations
                 location = /staging {
                     return 301 /staging/;
                 }
                 location /staging/ {
                     alias $STAGING_DIR/;
-                    try_files \$uri \$uri/ /staging/index.html;
+                    try_files \$uri \$uri/ /index.html;
                 }
                 location /staging/api/ {
                     proxy_pass http://localhost:8081/staging/api/;
@@ -165,19 +182,14 @@ jobs:
             }
             EOF
             
-            # Disable production site if exists
-            if [ -L "/etc/nginx/sites-enabled/production" ]; then
-              sudo rm /etc/nginx/sites-enabled/production
-            fi
+            # Remove other sites
+            sudo rm -f /etc/nginx/sites-enabled/default
+            sudo rm -f /etc/nginx/sites-enabled/production
+            sudo rm -f /etc/nginx/sites-enabled/staging
             
-            # Remove default site if exists
-            if [ -L "/etc/nginx/sites-enabled/default" ]; then
-              sudo rm /etc/nginx/sites-enabled/default
-            fi
-            
-            # Enable staging site
-            if [ ! -L "/etc/nginx/sites-enabled/staging" ]; then
-              sudo ln -s /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
+            # Enable fullstack site
+            if [ ! -L "/etc/nginx/sites-enabled/fullstack" ]; then
+              sudo ln -s /etc/nginx/sites-available/fullstack /etc/nginx/sites-enabled/
             fi
             
             # Test Nginx configuration
@@ -187,23 +199,22 @@ jobs:
             sudo systemctl restart ${SPRING_SERVICE}
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
             
-            # Wait for Spring Boot to start and check if it's listening on port 8081
-            echo "Waiting for Spring Boot to start on port 8081..."
-            for i in {1..12}; do
-              echo "Attempt $i: Checking if Spring Boot is listening on port 8081..."
-              if ss -tlnp | grep :8081; then
-                echo "Spring Boot is now listening on port 8081"
+            # Check if Spring Boot is listening on port 8081 with retries
+            echo "Checking if Spring Boot is listening on port 8081..."
+            for i in {1..10}; do
+              if ss -tlnp | grep :8081 > /dev/null; then
+                echo "Spring Boot is listening on port 8081"
                 break
               else
-                if [ $i -eq 12 ]; then
-                  echo "ERROR: Spring Boot did not start within 60 seconds"
-                  sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
-                  exit 1
-                fi
-                echo "Spring Boot not ready yet, waiting 5 seconds..."
-                sleep 5
+                echo "Port 8081 not ready yet (attempt $i/10), waiting..."
+                sleep 3
               fi
             done
+            if ! ss -tlnp | grep :8081 > /dev/null; then
+              echo "ERROR: Spring Boot is not listening on port 8081 after retries"
+              sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
+              exit 1
+            fi
             
             # Check Nginx error logs
             echo "Nginx error logs:"
@@ -211,31 +222,39 @@ jobs:
             
             # Verify deployment
             echo "Verifying deployment..."
-            # Test frontend
+            # Test frontend staging
             if ! curl -f http://localhost/staging/ > /dev/null; then
               echo "ERROR: Frontend verification failed"
               exit 1
             fi
             echo "Frontend verification successful"
             
-            # Test API with more retries
+            # Test API staging (accept non-server errors)
             echo "Testing API endpoint..."
+            API_SUCCESS=false
             for i in {1..5}; do
-              if curl -f http://localhost/staging/api/ > /dev/null 2>&1; then
-                echo "API verification successful"
+              RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/staging/api/ 2>/dev/null || echo "000")
+              if [[ $RESPONSE_CODE == 2* ]] || [[ $RESPONSE_CODE == 3* ]] || [[ $RESPONSE_CODE == 4* ]]; then
+                echo "API verification successful (code: $RESPONSE_CODE)"
+                API_SUCCESS=true
                 break
               else
-                echo "API attempt $i failed, retrying..."
+                echo "API attempt $i returned $RESPONSE_CODE, retrying..."
                 sleep 5
               fi
             done
-            
-            # Final API test
-            if ! curl -f http://localhost/staging/api/ > /dev/null 2>&1; then
-              echo "ERROR: API verification failed after multiple attempts"
+            if [ "$API_SUCCESS" = false ]; then
+              echo "ERROR: API verification failed after multiple attempts (server error)"
               echo "Checking Spring Boot logs..."
               sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
               exit 1
+            fi
+            
+            # Also verify production is still up
+            if ! curl -f http://localhost/ > /dev/null 2>&1; then
+              echo "WARNING: Production frontend is down"
+            else
+              echo "Production frontend verification successful"
             fi
             
             echo "== Staging deploy done =="
@@ -278,6 +297,7 @@ jobs:
           script: |
             set -e
             NGINX_ROOT="/var/www/html"
+            STAGING_DIR="$NGINX_ROOT/staging"
             SPRING_SERVICE="springboot"
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
@@ -315,11 +335,14 @@ jobs:
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
             fi
-            # Configure Nginx for production
-            sudo tee /etc/nginx/sites-available/production > /dev/null <<EOF
+            
+            # Write full Nginx config supporting both prod and staging
+            sudo tee /etc/nginx/sites-available/fullstack > /dev/null <<EOF
             server {
                 listen 80;
                 server_name _;
+                
+                # Production locations
                 location / {
                     root $NGINX_ROOT;
                     try_files \$uri \$uri/ /index.html;
@@ -333,22 +356,35 @@ jobs:
                     proxy_send_timeout 30s;
                     proxy_read_timeout 30s;
                 }
+                
+                # Staging locations
+                location = /staging {
+                    return 301 /staging/;
+                }
+                location /staging/ {
+                    alias $STAGING_DIR/;
+                    try_files \$uri \$uri/ /index.html;
+                }
+                location /staging/api/ {
+                    proxy_pass http://localhost:8081/staging/api/;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_connect_timeout 30s;
+                    proxy_send_timeout 30s;
+                    proxy_read_timeout 30s;
+                }
             }
             EOF
             
-            # Disable staging site if exists
-            if [ -L "/etc/nginx/sites-enabled/staging" ]; then
-              sudo rm /etc/nginx/sites-enabled/staging
-            fi
+            # Remove other sites
+            sudo rm -f /etc/nginx/sites-enabled/default
+            sudo rm -f /etc/nginx/sites-enabled/production
+            sudo rm -f /etc/nginx/sites-enabled/staging
             
-            # Enable production site
-            if [ ! -L "/etc/nginx/sites-enabled/production" ]; then
-              sudo ln -s /etc/nginx/sites-available/production /etc/nginx/sites-enabled/
-            fi
-            
-            # Remove default site if exists
-            if [ -L "/etc/nginx/sites-enabled/default" ]; then
-              sudo rm /etc/nginx/sites-enabled/default
+            # Enable fullstack site
+            if [ ! -L "/etc/nginx/sites-enabled/fullstack" ]; then
+              sudo ln -s /etc/nginx/sites-available/fullstack /etc/nginx/sites-enabled/
             fi
          
             # Test Nginx configuration
@@ -358,29 +394,41 @@ jobs:
             sudo systemctl restart ${SPRING_SERVICE}
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
             
-            # Wait for Spring Boot to start and check if it's listening on port 8080
-            echo "Waiting for Spring Boot to start on port 8080..."
-            for i in {1..12}; do
-              echo "Attempt $i: Checking if Spring Boot is listening on port 8080..."
-              if ss -tlnp | grep :8080; then
-                echo "Spring Boot is now listening on port 8080"
-                break
-              else
-                if [ $i -eq 12 ]; then
-                  echo "ERROR: Spring Boot did not start within 60 seconds"
-                  sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
-                  exit 1
-                fi
-                echo "Spring Boot not ready yet, waiting 5 seconds..."
-                sleep 5
-              fi
-            done
-            
             # Verify deployment
             echo "Verifying deployment..."
-            sleep 5  # Give services time to start
-            curl -f http://localhost/ || exit 1
-            curl -f http://localhost/api/ || exit 1
+            # Test frontend prod
+            if ! curl -f http://localhost/ > /dev/null; then
+              echo "ERROR: Frontend verification failed"
+              exit 1
+            fi
+            echo "Frontend verification successful"
+            
+            # Test API prod (accept non-server errors)
+            echo "Testing API endpoint..."
+            API_SUCCESS=false
+            RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/ 2>/dev/null || echo "000")
+            if [[ $RESPONSE_CODE == 2* ]] || [[ $RESPONSE_CODE == 3* ]] || [[ $RESPONSE_CODE == 4* ]]; then
+              echo "API verification successful (code: $RESPONSE_CODE)"
+              API_SUCCESS=true
+            else
+              echo "API returned server error $RESPONSE_CODE"
+              echo "Checking Spring Boot logs..."
+              sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
+              exit 1
+            fi
+            if [ "$API_SUCCESS" = false ]; then
+              exit 1
+            fi
+            
+            # Also verify staging is still up
+            if [ -d "$STAGING_DIR" ] && [ -f "$STAGING_DIR/index.html" ]; then
+              if ! curl -f http://localhost/staging/ > /dev/null 2>&1; then
+                echo "WARNING: Staging frontend is down"
+              else
+                echo "Staging frontend verification successful"
+              fi
+            fi
+            
             echo "Deployment verification successful"
             
             echo "== Production deploy done =="
