@@ -1,8 +1,8 @@
-name: CI/CD Deploy React + Spring Boot to EC2 (Staging & Prod)
+name: CI/CD Deploy React + Spring Boot to EC2 (Staging Only)
 
 on:
   push:
-    branches: [ staging, main, master ]
+    branches: [ staging ]
   pull_request:
     branches: [ staging ]
     types: [closed] # Only run when PR is closed (merged)
@@ -27,14 +27,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Build Frontend (React) for Production
-        run: |
-          cd frontend
-          npm ci
-          CI=false npm run build
-        env:
-          PUBLIC_URL: /
-
       - name: Build Frontend (React) for Staging
         run: |
           cd frontend
@@ -50,9 +42,8 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: site-and-jar
+          name: staging-artifacts
           path: |
-            frontend/build
             frontend/build-staging
             backend/target/*.jar
 
@@ -69,7 +60,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: site-and-jar
+          name: staging-artifacts
           path: ./build-artifacts
 
       - name: List downloaded files
@@ -92,16 +83,13 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
-            NGINX_ROOT="/var/www/html"
-            PROD_DIR="$NGINX_ROOT/production"
-            STAGING_DIR="$NGINX_ROOT/staging"
+            STAGING_DIR="/var/www/html/staging"
             SPRING_SERVICE="springboot-staging"
             JAR_FILE="app-staging.jar"
             echo "== Staging deploy start =="
             
-            # Create directories and set proper ownership
-            sudo mkdir -p "$PROD_DIR" "$STAGING_DIR"
-            sudo chown -R www-data:www-data "$PROD_DIR"
+            # Create staging directory and set proper ownership
+            sudo mkdir -p "$STAGING_DIR"
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Debug: List the contents of the staging directory
@@ -123,34 +111,6 @@ jobs:
             if [ ! -f "$STAGING_DIR/index.html" ]; then
               echo "ERROR: index.html not found in $STAGING_DIR"
               exit 1
-            fi
-            
-            # Create a placeholder for production if it doesn't exist
-            if [ ! -f "$PROD_DIR/index.html" ]; then
-              echo "Creating placeholder for production site"
-              sudo tee "$PROD_DIR/index.html" > /dev/null <<EOF
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Production Site</title>
-                <style>
-                    body { font-family: Arial, sans-serif; text-align: center; padding-top: 50px; }
-                    .container { max-width: 600px; margin: 0 auto; }
-                    h1 { color: #333; }
-                    p { color: #666; }
-                    a { color: #0066cc; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <h1>Production Site</h1>
-                    <p>The production site has not been deployed yet.</p>
-                    <p>You can access the staging environment <a href="/staging/">here</a>.</p>
-                </div>
-            </body>
-            </html>
-            EOF
-              sudo chown www-data:www-data "$PROD_DIR/index.html"
             fi
             
             # Backend
@@ -176,28 +136,11 @@ jobs:
               sudo systemctl enable ${SPRING_SERVICE}
             fi
             
-            # Write full Nginx config supporting both prod and staging
-            sudo tee /etc/nginx/sites-available/fullstack > /dev/null <<EOF
+            # Create staging-specific Nginx config
+            sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
             server {
-                listen 80 default_server;
-                listen [::]:80 default_server;
+                listen 80;
                 server_name _;
-                index index.html;
-                
-                # Production locations
-                location / {
-                    root $PROD_DIR;
-                    try_files \$uri \$uri/ /index.html;
-                }
-                location /api/ {
-                    proxy_pass http://localhost:8080/api/;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                    proxy_connect_timeout 30s;
-                    proxy_send_timeout 30s;
-                    proxy_read_timeout 30s;
-                }
                 
                 # Staging redirect
                 location = /staging {
@@ -208,6 +151,7 @@ jobs:
                 location /staging/ {
                     alias $STAGING_DIR/;
                     try_files \$uri \$uri/ /staging/index.html;
+                    index index.html;
                 }
                 
                 # Staging API
@@ -223,14 +167,9 @@ jobs:
             }
             EOF
             
-            # Remove other sites
-            sudo rm -f /etc/nginx/sites-enabled/default
-            sudo rm -f /etc/nginx/sites-enabled/production
-            sudo rm -f /etc/nginx/sites-enabled/staging
-            
-            # Enable fullstack site
-            if [ ! -L "/etc/nginx/sites-enabled/fullstack" ]; then
-              sudo ln -sf /etc/nginx/sites-available/fullstack /etc/nginx/sites-enabled/
+            # Enable staging site
+            if [ ! -L "/etc/nginx/sites-enabled/staging" ]; then
+              sudo ln -sf /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
             fi
             
             # Test Nginx configuration
@@ -264,6 +203,10 @@ jobs:
             echo "Nginx error logs:"
             sudo tail -n 20 /var/log/nginx/error.log
             
+            # Check Nginx access logs for staging
+            echo "Nginx access logs (staging):"
+            sudo tail -n 10 /var/log/nginx/access.log | grep staging || echo "No staging requests in access log yet"
+            
             # Verify deployment
             echo "Verifying deployment..."
             # Test frontend staging
@@ -296,205 +239,7 @@ jobs:
               exit 1
             fi
             
-            # Also verify production is still up
-            if ! curl -f http://localhost/ > /dev/null 2>&1; then
-              echo "WARNING: Production frontend is down"
-            else
-              echo "Production frontend verification successful"
-            fi
-            
             echo "== Staging deploy done =="
             echo "Staging URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging/"
             echo "  Backend API: http://${{ secrets.EC2_HOST }}/staging/api"
-
-  deploy-production:
-    name: Deploy to PRODUCTION EC2
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    environment: production
-
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: site-and-jar
-          path: ./build-artifacts
-
-      - name: List downloaded files
-        run: ls -laR ./build-artifacts
-
-      - name: Copy to EC2 (prod)
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: "build-artifacts"
-          target: "/home/${{ secrets.EC2_USER }}/app/"
-
-      - name: Deploy on EC2 (prod)
-        uses: appleboy/ssh-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            set -e
-            NGINX_ROOT="/var/www/html"
-            PROD_DIR="$NGINX_ROOT/production"
-            STAGING_DIR="$NGINX_ROOT/staging"
-            SPRING_SERVICE="springboot"
-            JAR_FILE="app.jar"
-            echo "== Production deploy start =="
-            
-            # Create directories and set proper ownership
-            sudo mkdir -p "$PROD_DIR" "$STAGING_DIR"
-            sudo chown -R www-data:www-data "$PROD_DIR"
-            sudo chown -R www-data:www-data "$STAGING_DIR"
-            
-            # Debug: List the contents of the app directory
-            echo "Contents of ~/app:"
-            ls -la ~/app
-            echo "Contents of ~/app/build-artifacts:"
-            ls -la ~/app/build-artifacts
-            echo "Contents of ~/app/build-artifacts/frontend:"
-            ls -la ~/app/build-artifacts/frontend
-            
-            # Frontend
-            sudo rm -rf "$PROD_DIR"/*
-            sudo cp -r ~/app/build-artifacts/frontend/build/* "$PROD_DIR"/
-            sudo chown -R www-data:www-data "$PROD_DIR"
-            
-            # Backend
-            cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
-            # Create systemd service if missing
-            if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
-              sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
-            [Unit]
-            Description=Spring Boot (prod)
-            After=network.target
-            [Service]
-            User=${{ secrets.EC2_USER }}
-            WorkingDirectory=/home/${{ secrets.EC2_USER }}/app
-            ExecStart=/usr/bin/java -jar $JAR_FILE --server.port=8080
-            SuccessExitStatus=143
-            Restart=always
-            RestartSec=5
-            [Install]
-            WantedBy=multi-user.target
-            EOF
-              sudo systemctl daemon-reload
-              sudo systemctl enable ${SPRING_SERVICE}
-            fi
-            
-            # Write full Nginx config supporting both prod and staging
-            sudo tee /etc/nginx/sites-available/fullstack > /dev/null <<EOF
-            server {
-                listen 80 default_server;
-                listen [::]:80 default_server;
-                server_name _;
-                index index.html;
-                
-                # Production locations
-                location / {
-                    root $PROD_DIR;
-                    try_files \$uri \$uri/ /index.html;
-                }
-                location /api/ {
-                    proxy_pass http://localhost:8080/api/;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                    proxy_connect_timeout 30s;
-                    proxy_send_timeout 30s;
-                    proxy_read_timeout 30s;
-                }
-                
-                # Staging redirect
-                location = /staging {
-                    return 301 /staging/;
-                }
-                
-                # Staging frontend
-                location /staging/ {
-                    alias $STAGING_DIR/;
-                    try_files \$uri \$uri/ /staging/index.html;
-                }
-                
-                # Staging API
-                location /staging/api/ {
-                    proxy_pass http://localhost:8081/staging/api/;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                    proxy_connect_timeout 30s;
-                    proxy_send_timeout 30s;
-                    proxy_read_timeout 30s;
-                }
-            }
-            EOF
-            
-            # Remove other sites
-            sudo rm -f /etc/nginx/sites-enabled/default
-            sudo rm -f /etc/nginx/sites-enabled/production
-            sudo rm -f /etc/nginx/sites-enabled/staging
-            
-            # Enable fullstack site
-            if [ ! -L "/etc/nginx/sites-enabled/fullstack" ]; then
-              sudo ln -sf /etc/nginx/sites-available/fullstack /etc/nginx/sites-enabled/
-            fi
-         
-            # Test Nginx configuration
-            sudo nginx -t
-            
-            # Restart Nginx to apply changes
-            sudo systemctl restart nginx
-            
-            # Restart Spring Boot service
-            sudo systemctl restart ${SPRING_SERVICE}
-            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
-            
-            # Verify deployment
-            echo "Verifying deployment..."
-            # Test frontend prod
-            sleep 5
-            if ! curl -f http://localhost/ > /dev/null; then
-              echo "ERROR: Frontend verification failed"
-              exit 1
-            fi
-            echo "Frontend verification successful"
-            
-            # Test API prod (accept non-server errors)
-            echo "Testing API endpoint..."
-            API_SUCCESS=false
-            RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/ 2>/dev/null || echo "000")
-            if [[ $RESPONSE_CODE == 2* ]] || [[ $RESPONSE_CODE == 3* ]] || [[ $RESPONSE_CODE == 4* ]]; then
-              echo "API verification successful (code: $RESPONSE_CODE)"
-              API_SUCCESS=true
-            else
-              echo "API returned server error $RESPONSE_CODE"
-              echo "Checking Spring Boot logs..."
-              sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
-              exit 1
-            fi
-            if [ "$API_SUCCESS" = false ]; then
-              exit 1
-            fi
-            
-            # Also verify staging is still up
-            if [ -d "$STAGING_DIR" ] && [ -f "$STAGING_DIR/index.html" ]; then
-              if ! curl -f http://localhost/staging/ > /dev/null 2>&1; then
-                echo "WARNING: Staging frontend is down"
-              else
-                echo "Staging frontend verification successful"
-              fi
-            fi
-            
-            echo "Deployment verification successful"
-            
-            echo "== Production deploy done =="
-            echo "Production URLs:"
-            echo "  Frontend: http://${{ secrets.EC2_HOST }}/"
-            echo "  Backend API: http://${{ secrets.EC2_HOST }}/api"
