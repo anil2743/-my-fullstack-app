@@ -149,9 +149,8 @@ jobs:
                 
                 # Staging frontend
                 location /staging/ {
-                    alias $STAGING_DIR/;
-                    try_files \$uri \$uri/ /staging/index.html;
-                    index index.html;
+                    root $STAGING_DIR;
+                    try_files \$uri \$uri/ /index.html;
                 }
                 
                 # Staging API
@@ -167,10 +166,10 @@ jobs:
             }
             EOF
             
-            # Enable staging site
-            if [ ! -L "/etc/nginx/sites-enabled/staging" ]; then
-              sudo ln -sf /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
-            fi
+            # Remove default site and enable staging site
+            sudo rm -f /etc/nginx/sites-enabled/default
+            sudo rm -f /etc/nginx/sites-enabled/staging
+            sudo ln -sf /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
             
             # Test Nginx configuration
             sudo nginx -t
