@@ -54,7 +54,7 @@ jobs:
       (github.event_name == 'pull_request' && github.base_ref == 'staging' && 
        github.event.pull_request.head.repo.full_name == github.repository)
     environment: staging
-    timeout-minutes: 15  # Add timeout to prevent hanging
+    timeout-minutes: 15
 
     steps:
       - name: Download artifacts
@@ -74,7 +74,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           source: "build-artifacts"
           target: "/home/${{ secrets.EC2_USER }}/staging/"
-          timeout: 60s  # Add timeout to SCP
+          timeout: 60s
 
       - name: Deploy on EC2 (staging)
         uses: appleboy/ssh-action@v0.1.7
@@ -98,6 +98,8 @@ jobs:
             ls -la $STAGING_HOME/build-artifacts
             echo "Contents of $STAGING_HOME/build-artifacts/frontend:"
             ls -la $STAGING_HOME/build-artifacts/frontend
+            echo "Contents of $STAGING_HOME/build-artifacts/frontend/build:"
+            ls -la $STAGING_HOME/build-artifacts/frontend/build
 
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
@@ -177,7 +179,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     environment: production
-    timeout-minutes: 15  # Add timeout to prevent hanging
+    timeout-minutes: 15
 
     steps:
       - name: Download artifacts
@@ -197,7 +199,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           source: "build-artifacts"
           target: "/home/${{ secrets.EC2_USER }}/app/"
-          timeout: 60s  # Add timeout to SCP
+          timeout: 60s
 
       - name: Deploy on EC2 (prod)
         uses: appleboy/ssh-action@v0.1.7
@@ -220,6 +222,8 @@ jobs:
             ls -la $APP_HOME/build-artifacts
             echo "Contents of $APP_HOME/build-artifacts/frontend:"
             ls -la $APP_HOME/build-artifacts/frontend
+            echo "Contents of $APP_HOME/build-artifacts/frontend/build:"
+            ls -la $APP_HOME/build-artifacts/frontend/build
 
             # Frontend
             sudo mkdir -p "$NGINX_ROOT"
