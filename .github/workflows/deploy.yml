@@ -93,10 +93,15 @@ jobs:
           script: |
             set -e
             NGINX_ROOT="/var/www/html"
+            PROD_DIR="$NGINX_ROOT/production"
             STAGING_DIR="$NGINX_ROOT/staging"
             SPRING_SERVICE="springboot-staging"
             JAR_FILE="app-staging.jar"
             echo "== Staging deploy start =="
+            
+            # Create directories
+            sudo mkdir -p "$PROD_DIR" "$STAGING_DIR"
+            
             # Debug: List the contents of the staging directory
             echo "Contents of ~/staging:"
             ls -la ~/staging
@@ -104,8 +109,8 @@ jobs:
             ls -la ~/staging/build-artifacts
             echo "Contents of ~/staging/build-artifacts/frontend:"
             ls -la ~/staging/build-artifacts/frontend
+            
             # Frontend
-            sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
             sudo cp -r ~/staging/build-artifacts/frontend/build-staging/* "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
@@ -144,28 +149,18 @@ jobs:
             # Write full Nginx config supporting both prod and staging
             sudo tee /etc/nginx/sites-available/fullstack > /dev/null <<EOF
             server {
-                listen 80;
+                listen 80 default_server;
+                listen [::]:80 default_server;
                 server_name _;
+                index index.html;
                 
                 # Production locations
                 location / {
-                    root $NGINX_ROOT;
+                    root $PROD_DIR;
                     try_files \$uri \$uri/ /index.html =404;
-                    index index.html;
                 }
                 location /api/ {
                     proxy_pass http://localhost:8080/api/;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                    proxy_connect_timeout 30s;
-                    proxy_send_timeout 30s;
-                    proxy_read_timeout 30s;
-                }
-                
-                # Staging API
-                location /staging/api/ {
-                    proxy_pass http://localhost:8081/staging/api/;
                     proxy_set_header Host \$host;
                     proxy_set_header X-Real-IP \$remote_addr;
                     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -182,11 +177,18 @@ jobs:
                 # Staging frontend
                 location /staging/ {
                     alias $STAGING_DIR/;
-                    try_files \$uri \$uri/ @staging-spa;
-                    index index.html;
+                    try_files \$uri \$uri/ /staging/index.html =404;
                 }
-                location @staging-spa {
-                    rewrite ^/staging/.*\$ /staging/index.html last;
+                
+                # Staging API
+                location /staging/api/ {
+                    proxy_pass http://localhost:8081/staging/api/;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_connect_timeout 30s;
+                    proxy_send_timeout 30s;
+                    proxy_read_timeout 30s;
                 }
             }
             EOF
@@ -198,7 +200,7 @@ jobs:
             
             # Enable fullstack site
             if [ ! -L "/etc/nginx/sites-enabled/fullstack" ]; then
-              sudo ln -s /etc/nginx/sites-available/fullstack /etc/nginx/sites-enabled/
+              sudo ln -sf /etc/nginx/sites-available/fullstack /etc/nginx/sites-enabled/
             fi
             
             # Test Nginx configuration
@@ -262,15 +264,17 @@ jobs:
             fi
             
             # Also verify production is still up
-            if ! curl -f http://localhost/ > /dev/null 2>&1; then
-              echo "WARNING: Production frontend is down"
-            else
-              echo "Production frontend verification successful"
+            if [ -d "$PROD_DIR" ] && [ -f "$PROD_DIR/index.html" ]; then
+              if ! curl -f http://localhost/ > /dev/null 2>&1; then
+                echo "WARNING: Production frontend is down"
+              else
+                echo "Production frontend verification successful"
+              fi
             fi
             
             echo "== Staging deploy done =="
             echo "Staging URLs:"
-            echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging"
+            echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging/"
             echo "  Backend API: http://${{ secrets.EC2_HOST }}/staging/api"
 
   deploy-production:
@@ -308,10 +312,15 @@ jobs:
           script: |
             set -e
             NGINX_ROOT="/var/www/html"
+            PROD_DIR="$NGINX_ROOT/production"
             STAGING_DIR="$NGINX_ROOT/staging"
             SPRING_SERVICE="springboot"
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
+            
+            # Create directories
+            sudo mkdir -p "$PROD_DIR" "$STAGING_DIR"
+            
             # Debug: List the contents of the app directory
             echo "Contents of ~/app:"
             ls -la ~/app
@@ -319,11 +328,11 @@ jobs:
             ls -la ~/app/build-artifacts
             echo "Contents of ~/app/build-artifacts/frontend:"
             ls -la ~/app/build-artifacts/frontend
+            
             # Frontend
-            sudo mkdir -p "$NGINX_ROOT"
-            sudo rm -rf "$NGINX_ROOT"/*
-            sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
-            sudo chown -R www-data:www-data "$NGINX_ROOT"
+            sudo rm -rf "$PROD_DIR"/*
+            sudo cp -r ~/app/build-artifacts/frontend/build/* "$PROD_DIR"/
+            sudo chown -R www-data:www-data "$PROD_DIR"
             
             # Backend
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
@@ -350,28 +359,18 @@ jobs:
             # Write full Nginx config supporting both prod and staging
             sudo tee /etc/nginx/sites-available/fullstack > /dev/null <<EOF
             server {
-                listen 80;
+                listen 80 default_server;
+                listen [::]:80 default_server;
                 server_name _;
+                index index.html;
                 
                 # Production locations
                 location / {
-                    root $NGINX_ROOT;
+                    root $PROD_DIR;
                     try_files \$uri \$uri/ /index.html =404;
-                    index index.html;
                 }
                 location /api/ {
                     proxy_pass http://localhost:8080/api/;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                    proxy_connect_timeout 30s;
-                    proxy_send_timeout 30s;
-                    proxy_read_timeout 30s;
-                }
-                
-                # Staging API
-                location /staging/api/ {
-                    proxy_pass http://localhost:8081/staging/api/;
                     proxy_set_header Host \$host;
                     proxy_set_header X-Real-IP \$remote_addr;
                     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -388,11 +387,18 @@ jobs:
                 # Staging frontend
                 location /staging/ {
                     alias $STAGING_DIR/;
-                    try_files \$uri \$uri/ @staging-spa;
-                    index index.html;
+                    try_files \$uri \$uri/ /staging/index.html =404;
                 }
-                location @staging-spa {
-                    rewrite ^/staging/.*\$ /staging/index.html last;
+                
+                # Staging API
+                location /staging/api/ {
+                    proxy_pass http://localhost:8081/staging/api/;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_connect_timeout 30s;
+                    proxy_send_timeout 30s;
+                    proxy_read_timeout 30s;
                 }
             }
             EOF
@@ -404,7 +410,7 @@ jobs:
             
             # Enable fullstack site
             if [ ! -L "/etc/nginx/sites-enabled/fullstack" ]; then
-              sudo ln -s /etc/nginx/sites-available/fullstack /etc/nginx/sites-enabled/
+              sudo ln -sf /etc/nginx/sites-available/fullstack /etc/nginx/sites-enabled/
             fi
          
             # Test Nginx configuration
@@ -454,5 +460,5 @@ jobs:
             
             echo "== Production deploy done =="
             echo "Production URLs:"
-            echo "  Frontend: http://${{ secrets.EC2_HOST }}"
+            echo "  Frontend: http://${{ secrets.EC2_HOST }}/"
             echo "  Backend API: http://${{ secrets.EC2_HOST }}/api"
