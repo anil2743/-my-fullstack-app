@@ -16,7 +16,7 @@ const BankTaxDetails = () => {
     ifscCode: '',
     bankName: '',
     isUSPerson: '',
-    taxResidency: 'INDIA',
+    taxResidency: 'IND',
     taxId: '', // This will be auto-populated with PAN
   });
 

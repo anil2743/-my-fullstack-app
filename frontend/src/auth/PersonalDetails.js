@@ -197,7 +197,7 @@ const PersonalDetails = ({ onNext, formData = {}, setFormData = () => {} }) => {
       value: /^[A-Za-z\s]*$/,
       message: 'Please enter a valid name (letters and spaces only)'
     },
-    maxLength: { value: 90, message: 'Maximum 90 characters allowed' },
+    maxLength: { value: 90, message: 'Maximum 90 characters allowed only' },
     validate: (value, formValues) => {
       const fatherName = formValues.fathersFirstName;
       if (!value?.trim() && !fatherName?.trim()) {
