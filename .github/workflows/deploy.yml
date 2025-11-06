@@ -5,6 +5,7 @@ on:
     branches: [ staging, main, master ]
   pull_request:
     branches: [ staging ]
+    types: [opened, synchronize, reopened]
 
 jobs:
   build:
@@ -31,10 +32,12 @@ jobs:
           cd frontend
           npm ci
           CI=false npm run build
+          
       - name: Build Backend (Spring Boot)
         run: |
           cd backend
           mvn -B -q -DskipTests clean package
+          
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -42,6 +45,7 @@ jobs:
           path: |
             frontend/build
             backend/target/*.jar
+
   deploy-staging:
     name: Deploy to STAGING EC2
     needs: build
@@ -84,6 +88,7 @@ jobs:
             SPRING_SERVICE="springboot-staging"
             JAR_FILE="app-staging.jar"
             echo "== Staging deploy start =="
+            
             # Debug: List the contents of the staging directory
             echo "Contents of ~/staging:"
             ls -la ~/staging
@@ -91,6 +96,7 @@ jobs:
             ls -la ~/staging/build-artifacts
             echo "Contents of ~/staging/build-artifacts/frontend:"
             ls -la ~/staging/build-artifacts/frontend
+            
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
@@ -100,6 +106,7 @@ jobs:
             # Backend
             mkdir -p ~/staging/backend
             cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
+            
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
               sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
@@ -119,6 +126,7 @@ jobs:
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
             fi
+            
             # Configure Nginx for staging
             sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
             server {
@@ -149,6 +157,7 @@ jobs:
             echo "Staging URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging"
             echo "  Backend API: http://${{ secrets.EC2_HOST }}/staging/api"
+
   deploy-production:
     name: Deploy to PRODUCTION EC2
     needs: build
@@ -187,6 +196,7 @@ jobs:
             SPRING_SERVICE="springboot"
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
+            
             # Debug: List the contents of the app directory
             echo "Contents of ~/app:"
             ls -la ~/app
@@ -194,14 +204,17 @@ jobs:
             ls -la ~/app/build-artifacts
             echo "Contents of ~/app/build-artifacts/frontend:"
             ls -la ~/app/build-artifacts/frontend
+            
             # Frontend
             sudo mkdir -p "$NGINX_ROOT"
-            sudo rm -rf "$NGINX_ROOT"/*
+            # Only remove non-staging files to preserve staging environment
+            sudo find "$NGINX_ROOT" -maxdepth 1 -not -name "staging" -exec rm -rf {} +
             sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
             # Backend
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
+            
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
               sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
@@ -221,6 +234,7 @@ jobs:
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
             fi
+            
             # Configure Nginx for production
             sudo tee /etc/nginx/sites-available/production > /dev/null <<EOF
             server {
