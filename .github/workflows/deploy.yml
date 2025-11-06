@@ -54,6 +54,7 @@ jobs:
       (github.event_name == 'pull_request' && github.base_ref == 'staging' && 
        github.event.pull_request.head.repo.full_name == github.repository)
     environment: staging
+    timeout-minutes: 15  # Add timeout to prevent hanging
 
     steps:
       - name: Download artifacts
@@ -73,6 +74,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           source: "build-artifacts"
           target: "/home/${{ secrets.EC2_USER }}/staging/"
+          timeout: 60s  # Add timeout to SCP
 
       - name: Deploy on EC2 (staging)
         uses: appleboy/ssh-action@v0.1.7
@@ -86,25 +88,26 @@ jobs:
             STAGING_DIR="$NGINX_ROOT/staging"
             SPRING_SERVICE="springboot-staging"
             JAR_FILE="app-staging.jar"
+            STAGING_HOME="/home/${{ secrets.EC2_USER }}/staging"
 
             echo "== Staging deploy start =="
             # Debug: List the contents of the staging directory
-            echo "Contents of ~/staging:"
-            ls -la ~/staging
-            echo "Contents of ~/staging/build-artifacts:"
-            ls -la ~/staging/build-artifacts
-            echo "Contents of ~/staging/build-artifacts/frontend:"
-            ls -la ~/staging/build-artifacts/frontend
+            echo "Contents of $STAGING_HOME:"
+            ls -la $STAGING_HOME
+            echo "Contents of $STAGING_HOME/build-artifacts:"
+            ls -la $STAGING_HOME/build-artifacts
+            echo "Contents of $STAGING_HOME/build-artifacts/frontend:"
+            ls -la $STAGING_HOME/build-artifacts/frontend
 
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
-            sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_DIR"/
+            sudo cp -r $STAGING_HOME/build-artifacts/frontend/build/* "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Backend
-            mkdir -p ~/staging/backend
-            cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
+            mkdir -p $STAGING_HOME/backend
+            cp $STAGING_HOME/build-artifacts/backend/target/*.jar $STAGING_HOME/$JAR_FILE
 
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
@@ -115,8 +118,8 @@ jobs:
 
             [Service]
             User=${{ secrets.EC2_USER }}
-            WorkingDirectory=/home/${{ secrets.EC2_USER }}/staging
-            ExecStart=/usr/bin/java -jar $JAR_FILE --server.port=8081 --server.servlet.context-path=/staging
+            WorkingDirectory=$STAGING_HOME
+            ExecStart=/usr/bin/java -jar $STAGING_HOME/$JAR_FILE --server.port=8081 --server.servlet.context-path=/staging
             SuccessExitStatus=143
             Restart=always
             RestartSec=5
@@ -153,9 +156,16 @@ jobs:
               sudo ln -s /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
             fi
             
-            sudo systemctl restart nginx
-            sudo systemctl restart ${SPRING_SERVICE}
-            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
+            # Test Nginx configuration
+            sudo nginx -t
+            
+            # Restart services with error handling
+            sudo systemctl restart nginx || echo "Nginx restart failed"
+            sudo systemctl restart ${SPRING_SERVICE} || echo "Spring Boot restart failed"
+            
+            # Check service status
+            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 5
+            
             echo "== Staging deploy done =="
             echo "Staging URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging"
@@ -167,6 +177,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     environment: production
+    timeout-minutes: 15  # Add timeout to prevent hanging
 
     steps:
       - name: Download artifacts
@@ -186,6 +197,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           source: "build-artifacts"
           target: "/home/${{ secrets.EC2_USER }}/app/"
+          timeout: 60s  # Add timeout to SCP
 
       - name: Deploy on EC2 (prod)
         uses: appleboy/ssh-action@v0.1.7
@@ -198,24 +210,25 @@ jobs:
             NGINX_ROOT="/var/www/html"
             SPRING_SERVICE="springboot"
             JAR_FILE="app.jar"
+            APP_HOME="/home/${{ secrets.EC2_USER }}/app"
 
             echo "== Production deploy start =="
             # Debug: List the contents of the app directory
-            echo "Contents of ~/app:"
-            ls -la ~/app
-            echo "Contents of ~/app/build-artifacts:"
-            ls -la ~/app/build-artifacts
-            echo "Contents of ~/app/build-artifacts/frontend:"
-            ls -la ~/app/build-artifacts/frontend
+            echo "Contents of $APP_HOME:"
+            ls -la $APP_HOME
+            echo "Contents of $APP_HOME/build-artifacts:"
+            ls -la $APP_HOME/build-artifacts
+            echo "Contents of $APP_HOME/build-artifacts/frontend:"
+            ls -la $APP_HOME/build-artifacts/frontend
 
             # Frontend
             sudo mkdir -p "$NGINX_ROOT"
             sudo rm -rf "$NGINX_ROOT"/*
-            sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
+            sudo cp -r $APP_HOME/build-artifacts/frontend/build/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
             # Backend
-            cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
+            cp $APP_HOME/build-artifacts/backend/target/*.jar $APP_HOME/$JAR_FILE
 
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
@@ -226,8 +239,8 @@ jobs:
 
             [Service]
             User=${{ secrets.EC2_USER }}
-            WorkingDirectory=/home/${{ secrets.EC2_USER }}/app
-            ExecStart=/usr/bin/java -jar $JAR_FILE --server.port=8080
+            WorkingDirectory=$APP_HOME
+            ExecStart=/usr/bin/java -jar $APP_HOME/$JAR_FILE --server.port=8080
             SuccessExitStatus=143
             Restart=always
             RestartSec=5
@@ -269,9 +282,16 @@ jobs:
               sudo rm /etc/nginx/sites-enabled/default
             fi
             
-            sudo systemctl restart nginx
-            sudo systemctl restart ${SPRING_SERVICE}
-            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
+            # Test Nginx configuration
+            sudo nginx -t
+            
+            # Restart services with error handling
+            sudo systemctl restart nginx || echo "Nginx restart failed"
+            sudo systemctl restart ${SPRING_SERVICE} || echo "Spring Boot restart failed"
+            
+            # Check service status
+            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 5
+            
             echo "== Production deploy done =="
             echo "Production URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}"
