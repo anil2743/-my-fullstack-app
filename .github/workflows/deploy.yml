@@ -110,6 +110,14 @@ jobs:
             sudo cp -r ~/staging/build-artifacts/frontend/build-staging/* "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
+            # Verify frontend files
+            echo "Contents of $STAGING_DIR:"
+            ls -la $STAGING_DIR
+            if [ ! -f "$STAGING_DIR/index.html" ]; then
+              echo "ERROR: index.html not found in $STAGING_DIR"
+              exit 1
+            fi
+            
             # Backend
             mkdir -p ~/staging/backend
             cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
@@ -137,12 +145,16 @@ jobs:
             server {
                 listen 80;
                 server_name _;
+                # Handle both /staging and /staging/
+                location = /staging {
+                    return 301 /staging/;
+                }
                 location /staging/ {
                     alias $STAGING_DIR/;
                     try_files \$uri \$uri/ /staging/index.html;
                 }
-                location /staging/api/ {
-                    proxy_pass http://localhost:8081/staging/api/;
+                location /staging/api {
+                    proxy_pass http://localhost:8081/staging/api;
                     proxy_set_header Host \$host;
                     proxy_set_header X-Real-IP \$remote_addr;
                     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -172,9 +184,14 @@ jobs:
             sudo systemctl restart ${SPRING_SERVICE}
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
             
+            # Check Nginx error logs
+            echo "Nginx error logs:"
+            sudo tail -n 20 /var/log/nginx/error.log
+            
             # Verify deployment
             echo "Verifying deployment..."
-            curl -f http://localhost/staging || exit 1
+            sleep 5  # Give services time to start
+            curl -f http://localhost/staging/ || exit 1
             curl -f http://localhost/staging/api || exit 1
             echo "Deployment verification successful"
             
@@ -297,6 +314,7 @@ jobs:
             
             # Verify deployment
             echo "Verifying deployment..."
+            sleep 5  # Give services time to start
             curl -f http://localhost/ || exit 1
             curl -f http://localhost/api || exit 1
             echo "Deployment verification successful"
