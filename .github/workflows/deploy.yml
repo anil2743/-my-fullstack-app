@@ -39,7 +39,7 @@ jobs:
         run: |
           cd frontend
           npm ci
-          CI=false PUBLIC_URL=/staging npm run build
+          CI=false PUBLIC_URL=/staging/ npm run build
           mv build build-staging
 
       - name: Build Backend (Spring Boot)
@@ -206,7 +206,10 @@ jobs:
             # Test Nginx configuration
             sudo nginx -t
             
+            # Restart Nginx to apply changes
             sudo systemctl restart nginx
+            
+            # Restart Spring Boot service
             sudo systemctl restart ${SPRING_SERVICE}
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
             
@@ -416,7 +419,10 @@ jobs:
             # Test Nginx configuration
             sudo nginx -t
             
+            # Restart Nginx to apply changes
             sudo systemctl restart nginx
+            
+            # Restart Spring Boot service
             sudo systemctl restart ${SPRING_SERVICE}
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
             
