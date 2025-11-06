@@ -5,7 +5,6 @@ on:
     branches: [ staging, main, master ]
   pull_request:
     branches: [ staging ]
-    types: [closed] # Only run when PR is closed (merged)
 
 jobs:
   build:
@@ -43,14 +42,14 @@ jobs:
           path: |
             frontend/build
             backend/target/*.jar
-
   deploy-staging:
     name: Deploy to STAGING EC2
     needs: build
     runs-on: ubuntu-latest
     if: >
       (github.ref == 'refs/heads/staging' && github.event_name == 'push') ||
-      (github.event_name == 'pull_request' && github.event.action == 'closed' && github.base_ref == 'staging' && github.event.pull_request.merged == true)
+      (github.event_name == 'pull_request' && github.base_ref == 'staging' && 
+       github.event.pull_request.head.repo.full_name == github.repository)
     environment: staging
 
     steps:
@@ -150,7 +149,6 @@ jobs:
             echo "Staging URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging"
             echo "  Backend API: http://${{ secrets.EC2_HOST }}/staging/api"
-
   deploy-production:
     name: Deploy to PRODUCTION EC2
     needs: build
