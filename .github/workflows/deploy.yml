@@ -187,22 +187,23 @@ jobs:
             sudo systemctl restart ${SPRING_SERVICE}
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
             
-            # Check if Spring Boot is listening on port 8081 with retries
-            echo "Checking if Spring Boot is listening on port 8081..."
-            for i in {1..10}; do
-              if ss -tlnp | grep :8081 > /dev/null; then
-                echo "Spring Boot is listening on port 8081"
+            # Wait for Spring Boot to start and check if it's listening on port 8081
+            echo "Waiting for Spring Boot to start on port 8081..."
+            for i in {1..12}; do
+              echo "Attempt $i: Checking if Spring Boot is listening on port 8081..."
+              if ss -tlnp | grep :8081; then
+                echo "Spring Boot is now listening on port 8081"
                 break
               else
-                echo "Port 8081 not ready yet (attempt $i/10), waiting..."
-                sleep 3
+                if [ $i -eq 12 ]; then
+                  echo "ERROR: Spring Boot did not start within 60 seconds"
+                  sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
+                  exit 1
+                fi
+                echo "Spring Boot not ready yet, waiting 5 seconds..."
+                sleep 5
               fi
             done
-            if ! ss -tlnp | grep :8081 > /dev/null; then
-              echo "ERROR: Spring Boot is not listening on port 8081 after retries"
-              sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
-              exit 1
-            fi
             
             # Check Nginx error logs
             echo "Nginx error logs:"
@@ -217,22 +218,21 @@ jobs:
             fi
             echo "Frontend verification successful"
             
-            # Test API with more retries (accept 2xx, 3xx, 4xx as successful, fail only on 5xx)
+            # Test API with more retries
             echo "Testing API endpoint..."
-            API_SUCCESS=false
             for i in {1..5}; do
-              RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/staging/api/ 2>/dev/null || echo "000")
-              if [[ $RESPONSE_CODE == 2* ]] || [[ $RESPONSE_CODE == 3* ]] || [[ $RESPONSE_CODE == 4* ]]; then
-                echo "API verification successful (code: $RESPONSE_CODE)"
-                API_SUCCESS=true
+              if curl -f http://localhost/staging/api/ > /dev/null 2>&1; then
+                echo "API verification successful"
                 break
               else
-                echo "API attempt $i returned $RESPONSE_CODE, retrying..."
+                echo "API attempt $i failed, retrying..."
                 sleep 5
               fi
             done
-            if [ "$API_SUCCESS" = false ]; then
-              echo "ERROR: API verification failed after multiple attempts (server error)"
+            
+            # Final API test
+            if ! curl -f http://localhost/staging/api/ > /dev/null 2>&1; then
+              echo "ERROR: API verification failed after multiple attempts"
               echo "Checking Spring Boot logs..."
               sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
               exit 1
@@ -358,23 +358,29 @@ jobs:
             sudo systemctl restart ${SPRING_SERVICE}
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
             
+            # Wait for Spring Boot to start and check if it's listening on port 8080
+            echo "Waiting for Spring Boot to start on port 8080..."
+            for i in {1..12}; do
+              echo "Attempt $i: Checking if Spring Boot is listening on port 8080..."
+              if ss -tlnp | grep :8080; then
+                echo "Spring Boot is now listening on port 8080"
+                break
+              else
+                if [ $i -eq 12 ]; then
+                  echo "ERROR: Spring Boot did not start within 60 seconds"
+                  sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
+                  exit 1
+                fi
+                echo "Spring Boot not ready yet, waiting 5 seconds..."
+                sleep 5
+              fi
+            done
+            
             # Verify deployment
             echo "Verifying deployment..."
-            sleep 10  # Give services time to start
-            if ! curl -f http://localhost/ > /dev/null; then
-              echo "ERROR: Frontend verification failed"
-              exit 1
-            fi
-            echo "Frontend verification successful"
-            RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/ 2>/dev/null || echo "000")
-            if [[ $RESPONSE_CODE == 2* ]] || [[ $RESPONSE_CODE == 3* ]] || [[ $RESPONSE_CODE == 4* ]]; then
-              echo "API verification successful (code: $RESPONSE_CODE)"
-            else
-              echo "ERROR: API returned server error $RESPONSE_CODE"
-              echo "Checking Spring Boot logs..."
-              sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
-              exit 1
-            fi
+            sleep 5  # Give services time to start
+            curl -f http://localhost/ || exit 1
+            curl -f http://localhost/api/ || exit 1
             echo "Deployment verification successful"
             
             echo "== Production deploy done =="
