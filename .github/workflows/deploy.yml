@@ -153,11 +153,14 @@ jobs:
                     alias $STAGING_DIR/;
                     try_files \$uri \$uri/ /staging/index.html;
                 }
-                location /staging/api {
-                    proxy_pass http://localhost:8081/staging/api;
+                location /staging/api/ {
+                    proxy_pass http://localhost:8081/staging/api/;
                     proxy_set_header Host \$host;
                     proxy_set_header X-Real-IP \$remote_addr;
                     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_connect_timeout 30s;
+                    proxy_send_timeout 30s;
+                    proxy_read_timeout 30s;
                 }
             }
             EOF
@@ -184,16 +187,47 @@ jobs:
             sudo systemctl restart ${SPRING_SERVICE}
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
             
+            # Check if Spring Boot is listening on port 8081
+            echo "Checking if Spring Boot is listening on port 8081..."
+            sleep 10  # Give more time for Spring Boot to start
+            if ! ss -tlnp | grep :8081; then
+              echo "ERROR: Spring Boot is not listening on port 8081"
+              sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 30
+              exit 1
+            fi
+            
             # Check Nginx error logs
             echo "Nginx error logs:"
             sudo tail -n 20 /var/log/nginx/error.log
             
             # Verify deployment
             echo "Verifying deployment..."
-            sleep 5  # Give services time to start
-            curl -f http://localhost/staging/ || exit 1
-            curl -f http://localhost/staging/api || exit 1
-            echo "Deployment verification successful"
+            # Test frontend
+            if ! curl -f http://localhost/staging/ > /dev/null; then
+              echo "ERROR: Frontend verification failed"
+              exit 1
+            fi
+            echo "Frontend verification successful"
+            
+            # Test API with more retries
+            echo "Testing API endpoint..."
+            for i in {1..5}; do
+              if curl -f http://localhost/staging/api/ > /dev/null 2>&1; then
+                echo "API verification successful"
+                break
+              else
+                echo "API attempt $i failed, retrying..."
+                sleep 5
+              fi
+            done
+            
+            # Final API test
+            if ! curl -f http://localhost/staging/api/ > /dev/null 2>&1; then
+              echo "ERROR: API verification failed after multiple attempts"
+              echo "Checking Spring Boot logs..."
+              sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
+              exit 1
+            fi
             
             echo "== Staging deploy done =="
             echo "Staging URLs:"
@@ -281,11 +315,14 @@ jobs:
                     root $NGINX_ROOT;
                     try_files \$uri \$uri/ /index.html;
                 }
-                location /api {
-                    proxy_pass http://localhost:8080/api;
+                location /api/ {
+                    proxy_pass http://localhost:8080/api/;
                     proxy_set_header Host \$host;
                     proxy_set_header X-Real-IP \$remote_addr;
                     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_connect_timeout 30s;
+                    proxy_send_timeout 30s;
+                    proxy_read_timeout 30s;
                 }
             }
             EOF
@@ -314,9 +351,9 @@ jobs:
             
             # Verify deployment
             echo "Verifying deployment..."
-            sleep 5  # Give services time to start
+            sleep 10  # Give services time to start
             curl -f http://localhost/ || exit 1
-            curl -f http://localhost/api || exit 1
+            curl -f http://localhost/api/ || exit 1
             echo "Deployment verification successful"
             
             echo "== Production deploy done =="
