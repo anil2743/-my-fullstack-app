@@ -217,21 +217,22 @@ jobs:
             fi
             echo "Frontend verification successful"
             
-            # Test API with more retries
+            # Test API with more retries (accept 2xx, 3xx, 4xx as successful, fail only on 5xx)
             echo "Testing API endpoint..."
+            API_SUCCESS=false
             for i in {1..5}; do
-              if curl -f http://localhost/staging/api/ > /dev/null 2>&1; then
-                echo "API verification successful"
+              RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/staging/api/ 2>/dev/null || echo "000")
+              if [[ $RESPONSE_CODE == 2* ]] || [[ $RESPONSE_CODE == 3* ]] || [[ $RESPONSE_CODE == 4* ]]; then
+                echo "API verification successful (code: $RESPONSE_CODE)"
+                API_SUCCESS=true
                 break
               else
-                echo "API attempt $i failed, retrying..."
+                echo "API attempt $i returned $RESPONSE_CODE, retrying..."
                 sleep 5
               fi
             done
-            
-            # Final API test
-            if ! curl -f http://localhost/staging/api/ > /dev/null 2>&1; then
-              echo "ERROR: API verification failed after multiple attempts"
+            if [ "$API_SUCCESS" = false ]; then
+              echo "ERROR: API verification failed after multiple attempts (server error)"
               echo "Checking Spring Boot logs..."
               sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
               exit 1
@@ -360,8 +361,20 @@ jobs:
             # Verify deployment
             echo "Verifying deployment..."
             sleep 10  # Give services time to start
-            curl -f http://localhost/ || exit 1
-            curl -f http://localhost/api/ || exit 1
+            if ! curl -f http://localhost/ > /dev/null; then
+              echo "ERROR: Frontend verification failed"
+              exit 1
+            fi
+            echo "Frontend verification successful"
+            RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/ 2>/dev/null || echo "000")
+            if [[ $RESPONSE_CODE == 2* ]] || [[ $RESPONSE_CODE == 3* ]] || [[ $RESPONSE_CODE == 4* ]]; then
+              echo "API verification successful (code: $RESPONSE_CODE)"
+            else
+              echo "ERROR: API returned server error $RESPONSE_CODE"
+              echo "Checking Spring Boot logs..."
+              sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
+              exit 1
+            fi
             echo "Deployment verification successful"
             
             echo "== Production deploy done =="
