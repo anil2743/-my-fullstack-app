@@ -27,21 +27,33 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Build Frontend (React)
+      - name: Build Frontend (React) for Production
         run: |
           cd frontend
           npm ci
           CI=false npm run build
+        env:
+          PUBLIC_URL: /
+
+      - name: Build Frontend (React) for Staging
+        run: |
+          cd frontend
+          npm ci
+          CI=false PUBLIC_URL=/staging npm run build
+          mv build build-staging
+
       - name: Build Backend (Spring Boot)
         run: |
           cd backend
           mvn -B -q -DskipTests clean package
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: site-and-jar
           path: |
             frontend/build
+            frontend/build-staging
             backend/target/*.jar
 
   deploy-staging:
@@ -95,7 +107,7 @@ jobs:
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
-            sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_DIR"/
+            sudo cp -r ~/staging/build-artifacts/frontend/build-staging/* "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Backend
@@ -138,10 +150,18 @@ jobs:
             }
             EOF
             
+            # Disable production site if exists
+            if [ -L "/etc/nginx/sites-enabled/production" ]; then
+              sudo rm /etc/nginx/sites-enabled/production
+            fi
+            
             # Enable staging site
             if [ ! -L "/etc/nginx/sites-enabled/staging" ]; then
               sudo ln -s /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
             fi
+            
+            # Test Nginx configuration
+            sudo nginx -t
             
             sudo systemctl restart nginx
             sudo systemctl restart ${SPRING_SERVICE}
@@ -241,6 +261,11 @@ jobs:
             }
             EOF
             
+            # Disable staging site if exists
+            if [ -L "/etc/nginx/sites-enabled/staging" ]; then
+              sudo rm /etc/nginx/sites-enabled/staging
+            fi
+            
             # Enable production site
             if [ ! -L "/etc/nginx/sites-enabled/production" ]; then
               sudo ln -s /etc/nginx/sites-available/production /etc/nginx/sites-enabled/
@@ -251,6 +276,9 @@ jobs:
               sudo rm /etc/nginx/sites-enabled/default
             fi
          
+            # Test Nginx configuration
+            sudo nginx -t
+            
             sudo systemctl restart nginx
             sudo systemctl restart ${SPRING_SERVICE}
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
