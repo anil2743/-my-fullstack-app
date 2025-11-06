@@ -37,13 +37,18 @@ jobs:
           cd backend
           mvn -B -q -DskipTests clean package
 
+      - name: Package artifacts
+        run: |
+          mkdir -p artifacts/frontend
+          cp -r frontend/build/* artifacts/frontend/
+          mkdir -p artifacts/backend
+          cp backend/target/*.jar artifacts/backend/
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: site-and-jar
-          path: |
-            frontend/build
-            backend/target/*.jar
+          path: artifacts/
 
   deploy-staging:
     name: Deploy to STAGING EC2
@@ -61,10 +66,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: site-and-jar
-          path: ./build-artifacts
+          path: ./artifacts
 
       - name: List downloaded files
-        run: ls -laR ./build-artifacts
+        run: |
+          echo "=== Artifact structure ==="
+          find ./artifacts -type f
+          echo "=== Frontend files ==="
+          ls -la ./artifacts/frontend/
+          echo "=== Backend files ==="
+          ls -la ./artifacts/backend/
 
       - name: Copy to EC2 (staging)
         uses: appleboy/scp-action@v0.1.7
@@ -72,7 +83,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "build-artifacts"
+          source: "artifacts"
           target: "/home/${{ secrets.EC2_USER }}/staging/"
           timeout: 60s
 
@@ -94,22 +105,21 @@ jobs:
             # Debug: List the contents of the staging directory
             echo "Contents of $STAGING_HOME:"
             ls -la $STAGING_HOME
-            echo "Contents of $STAGING_HOME/build-artifacts:"
-            ls -la $STAGING_HOME/build-artifacts
-            echo "Contents of $STAGING_HOME/build-artifacts/frontend:"
-            ls -la $STAGING_HOME/build-artifacts/frontend
-            echo "Contents of $STAGING_HOME/build-artifacts/frontend/build:"
-            ls -la $STAGING_HOME/build-artifacts/frontend/build
+            echo "Contents of $STAGING_HOME/artifacts:"
+            ls -la $STAGING_HOME/artifacts
+            echo "Contents of $STAGING_HOME/artifacts/frontend:"
+            ls -la $STAGING_HOME/artifacts/frontend
+            echo "Contents of $STAGING_HOME/artifacts/backend:"
+            ls -la $STAGING_HOME/artifacts/backend
 
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
-            sudo cp -r $STAGING_HOME/build-artifacts/frontend/build/* "$STAGING_DIR"/
+            sudo cp -r $STAGING_HOME/artifacts/frontend/* "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Backend
-            mkdir -p $STAGING_HOME/backend
-            cp $STAGING_HOME/build-artifacts/backend/target/*.jar $STAGING_HOME/$JAR_FILE
+            cp $STAGING_HOME/artifacts/backend/*.jar $STAGING_HOME/$JAR_FILE
 
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
@@ -186,10 +196,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: site-and-jar
-          path: ./build-artifacts
+          path: ./artifacts
 
       - name: List downloaded files
-        run: ls -laR ./build-artifacts
+        run: |
+          echo "=== Artifact structure ==="
+          find ./artifacts -type f
+          echo "=== Frontend files ==="
+          ls -la ./artifacts/frontend/
+          echo "=== Backend files ==="
+          ls -la ./artifacts/backend/
 
       - name: Copy to EC2 (prod)
         uses: appleboy/scp-action@v0.1.7
@@ -197,7 +213,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "build-artifacts"
+          source: "artifacts"
           target: "/home/${{ secrets.EC2_USER }}/app/"
           timeout: 60s
 
@@ -218,21 +234,21 @@ jobs:
             # Debug: List the contents of the app directory
             echo "Contents of $APP_HOME:"
             ls -la $APP_HOME
-            echo "Contents of $APP_HOME/build-artifacts:"
-            ls -la $APP_HOME/build-artifacts
-            echo "Contents of $APP_HOME/build-artifacts/frontend:"
-            ls -la $APP_HOME/build-artifacts/frontend
-            echo "Contents of $APP_HOME/build-artifacts/frontend/build:"
-            ls -la $APP_HOME/build-artifacts/frontend/build
+            echo "Contents of $APP_HOME/artifacts:"
+            ls -la $APP_HOME/artifacts
+            echo "Contents of $APP_HOME/artifacts/frontend:"
+            ls -la $APP_HOME/artifacts/frontend
+            echo "Contents of $APP_HOME/artifacts/backend:"
+            ls -la $APP_HOME/artifacts/backend
 
             # Frontend
             sudo mkdir -p "$NGINX_ROOT"
             sudo rm -rf "$NGINX_ROOT"/*
-            sudo cp -r $APP_HOME/build-artifacts/frontend/build/* "$NGINX_ROOT"/
+            sudo cp -r $APP_HOME/artifacts/frontend/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
             # Backend
-            cp $APP_HOME/build-artifacts/backend/target/*.jar $APP_HOME/$JAR_FILE
+            cp $APP_HOME/artifacts/backend/*.jar $APP_HOME/$JAR_FILE
 
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
