@@ -162,14 +162,21 @@ jobs:
                     proxy_read_timeout 30s;
                 }
                 
-                # Staging locations
+                # Staging redirect
                 location = /staging {
                     return 301 /staging/;
                 }
+                
+                # Staging frontend
                 location /staging/ {
                     alias $STAGING_DIR/;
-                    try_files \$uri \$uri/ /index.html;
+                    try_files \$uri \$uri/ @staging-fallback;
                 }
+                location @staging-fallback {
+                    rewrite ^ /staging/index.html last;
+                }
+                
+                # Staging API
                 location /staging/api/ {
                     proxy_pass http://localhost:8081/staging/api/;
                     proxy_set_header Host \$host;
@@ -223,6 +230,7 @@ jobs:
             # Verify deployment
             echo "Verifying deployment..."
             # Test frontend staging
+            sleep 5
             if ! curl -f http://localhost/staging/ > /dev/null; then
               echo "ERROR: Frontend verification failed"
               exit 1
@@ -233,6 +241,7 @@ jobs:
             echo "Testing API endpoint..."
             API_SUCCESS=false
             for i in {1..5}; do
+              sleep 2
               RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/staging/api/ 2>/dev/null || echo "000")
               if [[ $RESPONSE_CODE == 2* ]] || [[ $RESPONSE_CODE == 3* ]] || [[ $RESPONSE_CODE == 4* ]]; then
                 echo "API verification successful (code: $RESPONSE_CODE)"
@@ -357,14 +366,21 @@ jobs:
                     proxy_read_timeout 30s;
                 }
                 
-                # Staging locations
+                # Staging redirect
                 location = /staging {
                     return 301 /staging/;
                 }
+                
+                # Staging frontend
                 location /staging/ {
                     alias $STAGING_DIR/;
-                    try_files \$uri \$uri/ /index.html;
+                    try_files \$uri \$uri/ @staging-fallback;
                 }
+                location @staging-fallback {
+                    rewrite ^ /staging/index.html last;
+                }
+                
+                # Staging API
                 location /staging/api/ {
                     proxy_pass http://localhost:8081/staging/api/;
                     proxy_set_header Host \$host;
@@ -397,6 +413,7 @@ jobs:
             # Verify deployment
             echo "Verifying deployment..."
             # Test frontend prod
+            sleep 5
             if ! curl -f http://localhost/ > /dev/null; then
               echo "ERROR: Frontend verification failed"
               exit 1
