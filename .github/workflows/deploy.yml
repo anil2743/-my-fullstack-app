@@ -31,31 +31,17 @@ jobs:
           cd frontend
           npm ci
           CI=false npm run build
-
       - name: Build Backend (Spring Boot)
         run: |
           cd backend
           mvn -B -q -DskipTests clean package
-
-      - name: Package artifacts
-        run: |
-          # Frontend: Zip to save transfer time
-          cd frontend/build
-          zip -r ../build.zip .
-          cd ../..
-          mkdir -p artifacts/frontend
-          cp frontend/build.zip artifacts/frontend/
-
-          # Backend: Keep JAR as-is
-          mkdir -p artifacts/backend
-          cp backend/target/*.jar artifacts/backend/
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: site-and-jar
-          path: artifacts/
-
+          path: |
+            frontend/build
+            backend/target/*.jar
   deploy-staging:
     name: Deploy to STAGING EC2
     needs: build
@@ -65,116 +51,83 @@ jobs:
       (github.event_name == 'pull_request' && github.base_ref == 'staging' && 
        github.event.pull_request.head.repo.full_name == github.repository)
     environment: staging
-    timeout-minutes: 15
 
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: site-and-jar
-          path: ./artifacts
+          path: ./build-artifacts
 
       - name: List downloaded files
-        run: |
-          echo "=== Artifact structure ==="
-          find ./artifacts -type f
-          echo "=== Frontend files ==="
-          ls -la ./artifacts/frontend/
-          echo "=== Backend files ==="
-          ls -la ./artifacts/backend/
+        run: ls -laR ./build-artifacts
 
       - name: Copy to EC2 (staging)
-        uses: appleboy/scp-action@v1.0.3
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "artifacts"
+          source: "build-artifacts"
           target: "/home/${{ secrets.EC2_USER }}/staging/"
-          timeout: 2m
-          rm: true
-
-      - name: Verify SCP (staging)
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            ls -la /home/${{ secrets.EC2_USER }}/staging/artifacts/ || echo "Remote artifacts missing!"
 
       - name: Deploy on EC2 (staging)
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            set -euo pipefail
+            set -e
             NGINX_ROOT="/var/www/html"
             STAGING_DIR="$NGINX_ROOT/staging"
             SPRING_SERVICE="springboot-staging"
             JAR_FILE="app-staging.jar"
-            STAGING_HOME="/home/${{ secrets.EC2_USER }}/staging"
-
             echo "== Staging deploy start =="
             # Debug: List the contents of the staging directory
-            echo "Contents of $STAGING_HOME:"
-            ls -la $STAGING_HOME
-            echo "Contents of $STAGING_HOME/artifacts:"
-            ls -la $STAGING_HOME/artifacts
-            echo "Contents of $STAGING_HOME/artifacts/frontend:"
-            ls -la $STAGING_HOME/artifacts/frontend
-            echo "Contents of $STAGING_HOME/artifacts/backend:"
-            ls -la $STAGING_HOME/artifacts/backend
-
-            # Install unzip if needed
-            if ! command -v unzip &> /dev/null; then
-              sudo apt update && sudo apt install unzip -y
-            fi
-
+            echo "Contents of ~/staging:"
+            ls -la ~/staging
+            echo "Contents of ~/staging/build-artifacts:"
+            ls -la ~/staging/build-artifacts
+            echo "Contents of ~/staging/build-artifacts/frontend:"
+            ls -la ~/staging/build-artifacts/frontend
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
-            unzip $STAGING_HOME/artifacts/frontend/build.zip -d "$STAGING_DIR"
+            sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Backend
-            cp $STAGING_HOME/artifacts/backend/*.jar $STAGING_HOME/$JAR_FILE
-
+            mkdir -p ~/staging/backend
+            cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
               sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
             [Unit]
             Description=Spring Boot (staging)
             After=network.target
-
             [Service]
             User=${{ secrets.EC2_USER }}
-            WorkingDirectory=$STAGING_HOME
-            ExecStart=/usr/bin/java -jar $STAGING_HOME/$JAR_FILE --server.port=8081 --server.servlet.context-path=/staging
+            WorkingDirectory=/home/${{ secrets.EC2_USER }}/staging
+            ExecStart=/usr/bin/java -jar $JAR_FILE --server.port=8081 --server.servlet.context-path=/staging
             SuccessExitStatus=143
             Restart=always
             RestartSec=5
-
             [Install]
             WantedBy=multi-user.target
             EOF
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
             fi
-
             # Configure Nginx for staging
             sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
             server {
                 listen 80;
                 server_name _;
-
                 location /staging {
                     alias $STAGING_DIR;
                     try_files \$uri \$uri/ /staging/index.html;
                 }
-
                 location /staging/api {
                     proxy_pass http://localhost:8081/staging/api;
                     proxy_set_header Host \$host;
@@ -189,136 +142,94 @@ jobs:
               sudo ln -s /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
             fi
             
-            # Test Nginx configuration
-            sudo nginx -t
-            
-            # Restart services
             sudo systemctl restart nginx
             sudo systemctl restart ${SPRING_SERVICE}
-            
-            # Check service status
-            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 5
-            
+            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
             echo "== Staging deploy done =="
             echo "Staging URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging"
             echo "  Backend API: http://${{ secrets.EC2_HOST }}/staging/api"
-
   deploy-production:
     name: Deploy to PRODUCTION EC2
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     environment: production
-    timeout-minutes: 15
 
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: site-and-jar
-          path: ./artifacts
+          path: ./build-artifacts
 
       - name: List downloaded files
-        run: |
-          echo "=== Artifact structure ==="
-          find ./artifacts -type f
-          echo "=== Frontend files ==="
-          ls -la ./artifacts/frontend/
-          echo "=== Backend files ==="
-          ls -la ./artifacts/backend/
+        run: ls -laR ./build-artifacts
 
       - name: Copy to EC2 (prod)
-        uses: appleboy/scp-action@v1.0.3
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "artifacts"
+          source: "build-artifacts"
           target: "/home/${{ secrets.EC2_USER }}/app/"
-          timeout: 2m
-          rm: true
-
-      - name: Verify SCP (prod)
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            ls -la /home/${{ secrets.EC2_USER }}/app/artifacts/ || echo "Remote artifacts missing!"
 
       - name: Deploy on EC2 (prod)
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            set -euo pipefail
+            set -e
             NGINX_ROOT="/var/www/html"
             SPRING_SERVICE="springboot"
             JAR_FILE="app.jar"
-            APP_HOME="/home/${{ secrets.EC2_USER }}/app"
-
             echo "== Production deploy start =="
             # Debug: List the contents of the app directory
-            echo "Contents of $APP_HOME:"
-            ls -la $APP_HOME
-            echo "Contents of $APP_HOME/artifacts:"
-            ls -la $APP_HOME/artifacts
-            echo "Contents of $APP_HOME/artifacts/frontend:"
-            ls -la $APP_HOME/artifacts/frontend
-            echo "Contents of $APP_HOME/artifacts/backend:"
-            ls -la $APP_HOME/artifacts/backend
-
-            # Install unzip if needed
-            if ! command -v unzip &> /dev/null; then
-              sudo apt update && sudo apt install unzip -y
-            fi
-
+            echo "Contents of ~/app:"
+            ls -la ~/app
+            echo "Contents of ~/app/build-artifacts:"
+            ls -la ~/app/build-artifacts
+            echo "Contents of ~/app/build-artifacts/frontend:"
+            ls -la ~/app/build-artifacts/frontend
             # Frontend
             sudo mkdir -p "$NGINX_ROOT"
             sudo rm -rf "$NGINX_ROOT"/*
-            unzip $APP_HOME/artifacts/frontend/build.zip -d "$NGINX_ROOT"
+            sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
             # Backend
-            cp $APP_HOME/artifacts/backend/*.jar $APP_HOME/$JAR_FILE
-
+            cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
               sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
             [Unit]
             Description=Spring Boot (prod)
             After=network.target
-
             [Service]
             User=${{ secrets.EC2_USER }}
-            WorkingDirectory=$APP_HOME
-            ExecStart=/usr/bin/java -jar $APP_HOME/$JAR_FILE --server.port=8080
+            WorkingDirectory=/home/${{ secrets.EC2_USER }}/app
+            ExecStart=/usr/bin/java -jar $JAR_FILE --server.port=8080
             SuccessExitStatus=143
             Restart=always
             RestartSec=5
-
             [Install]
             WantedBy=multi-user.target
             EOF
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
             fi
-
             # Configure Nginx for production
             sudo tee /etc/nginx/sites-available/production > /dev/null <<EOF
             server {
                 listen 80;
                 server_name _;
-
                 location / {
                     root $NGINX_ROOT;
                     try_files \$uri \$uri/ /index.html;
                 }
-
                 location /api {
                     proxy_pass http://localhost:8080/api;
                     proxy_set_header Host \$host;
@@ -337,17 +248,10 @@ jobs:
             if [ -L "/etc/nginx/sites-enabled/default" ]; then
               sudo rm /etc/nginx/sites-enabled/default
             fi
-            
-            # Test Nginx configuration
-            sudo nginx -t
-            
-            # Restart services
+         
             sudo systemctl restart nginx
             sudo systemctl restart ${SPRING_SERVICE}
-            
-            # Check service status
-            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 5
-            
+            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
             echo "== Production deploy done =="
             echo "Production URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}"
