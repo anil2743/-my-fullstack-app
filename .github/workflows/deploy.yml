@@ -99,8 +99,10 @@ jobs:
             JAR_FILE="app-staging.jar"
             echo "== Staging deploy start =="
             
-            # Create directories
+            # Create directories and set proper ownership
             sudo mkdir -p "$PROD_DIR" "$STAGING_DIR"
+            sudo chown -R www-data:www-data "$PROD_DIR"
+            sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Debug: List the contents of the staging directory
             echo "Contents of ~/staging:"
@@ -121,6 +123,34 @@ jobs:
             if [ ! -f "$STAGING_DIR/index.html" ]; then
               echo "ERROR: index.html not found in $STAGING_DIR"
               exit 1
+            fi
+            
+            # Create a placeholder for production if it doesn't exist
+            if [ ! -f "$PROD_DIR/index.html" ]; then
+              echo "Creating placeholder for production site"
+              sudo tee "$PROD_DIR/index.html" > /dev/null <<EOF
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Production Site</title>
+                <style>
+                    body { font-family: Arial, sans-serif; text-align: center; padding-top: 50px; }
+                    .container { max-width: 600px; margin: 0 auto; }
+                    h1 { color: #333; }
+                    p { color: #666; }
+                    a { color: #0066cc; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Production Site</h1>
+                    <p>The production site has not been deployed yet.</p>
+                    <p>You can access the staging environment <a href="/staging/">here</a>.</p>
+                </div>
+            </body>
+            </html>
+            EOF
+              sudo chown www-data:www-data "$PROD_DIR/index.html"
             fi
             
             # Backend
@@ -157,7 +187,7 @@ jobs:
                 # Production locations
                 location / {
                     root $PROD_DIR;
-                    try_files \$uri \$uri/ /index.html =404;
+                    try_files \$uri \$uri/ /index.html;
                 }
                 location /api/ {
                     proxy_pass http://localhost:8080/api/;
@@ -177,7 +207,7 @@ jobs:
                 # Staging frontend
                 location /staging/ {
                     alias $STAGING_DIR/;
-                    try_files \$uri \$uri/ /staging/index.html =404;
+                    try_files \$uri \$uri/ /staging/index.html;
                 }
                 
                 # Staging API
@@ -267,12 +297,10 @@ jobs:
             fi
             
             # Also verify production is still up
-            if [ -d "$PROD_DIR" ] && [ -f "$PROD_DIR/index.html" ]; then
-              if ! curl -f http://localhost/ > /dev/null 2>&1; then
-                echo "WARNING: Production frontend is down"
-              else
-                echo "Production frontend verification successful"
-              fi
+            if ! curl -f http://localhost/ > /dev/null 2>&1; then
+              echo "WARNING: Production frontend is down"
+            else
+              echo "Production frontend verification successful"
             fi
             
             echo "== Staging deploy done =="
@@ -321,8 +349,10 @@ jobs:
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
             
-            # Create directories
+            # Create directories and set proper ownership
             sudo mkdir -p "$PROD_DIR" "$STAGING_DIR"
+            sudo chown -R www-data:www-data "$PROD_DIR"
+            sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Debug: List the contents of the app directory
             echo "Contents of ~/app:"
@@ -370,7 +400,7 @@ jobs:
                 # Production locations
                 location / {
                     root $PROD_DIR;
-                    try_files \$uri \$uri/ /index.html =404;
+                    try_files \$uri \$uri/ /index.html;
                 }
                 location /api/ {
                     proxy_pass http://localhost:8080/api/;
@@ -390,7 +420,7 @@ jobs:
                 # Staging frontend
                 location /staging/ {
                     alias $STAGING_DIR/;
-                    try_files \$uri \$uri/ /staging/index.html =404;
+                    try_files \$uri \$uri/ /staging/index.html;
                 }
                 
                 # Staging API
