@@ -136,26 +136,29 @@ jobs:
               sudo systemctl enable ${SPRING_SERVICE}
             fi
             
-            # Create staging-specific Nginx config with cache control headers
+            # Completely reset Nginx configuration
+            echo "Resetting Nginx configuration..."
+            
+            # Remove all existing site configurations
+            sudo rm -f /etc/nginx/sites-enabled/*
+            sudo rm -f /etc/nginx/sites-available/*
+            
+            # Create a new, clean Nginx configuration
             sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
             server {
                 listen 80;
                 server_name _;
+                index index.html;
                 
                 # Staging redirect
                 location = /staging {
                     return 301 /staging/;
                 }
                 
-                # Staging frontend with cache control
+                # Staging frontend - FIXED CONFIGURATION
                 location /staging/ {
-                    alias $STAGING_DIR/;
+                    root /var/www/html;
                     try_files \$uri \$uri/ /staging/index.html;
-                    
-                    # Add cache control headers to prevent browser caching
-                    add_header Cache-Control "no-cache, no-store, must-revalidate";
-                    add_header Pragma "no-cache";
-                    add_header Expires "0";
                 }
                 
                 # Staging API
@@ -168,12 +171,15 @@ jobs:
                     proxy_send_timeout 30s;
                     proxy_read_timeout 30s;
                 }
+                
+                # Block all other requests
+                location / {
+                    return 404;
+                }
             }
             EOF
             
-            # Remove default site and enable staging site
-            sudo rm -f /etc/nginx/sites-enabled/default
-            sudo rm -f /etc/nginx/sites-enabled/staging
+            # Enable the staging site
             sudo ln -sf /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
             
             # Test Nginx configuration
@@ -247,5 +253,3 @@ jobs:
             echo "Staging URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging/"
             echo "  Backend API: http://${{ secrets.EC2_HOST }}/staging/api"
-            echo ""
-            echo "IMPORTANT: If you still see a blank page, please clear your browser cache or do a hard refresh (Ctrl+F5)"
