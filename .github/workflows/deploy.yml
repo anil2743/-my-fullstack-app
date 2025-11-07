@@ -28,13 +28,24 @@ jobs:
 
       - name: Build Frontend (React)
         run: |
+          set -e
           cd frontend
           npm ci
+          # Production build
           CI=false npm run build
-          CI=false npm run build:staging || true
+          # Staging build (must output to build-staging)
+          # If you don't have this script, create one or copy build to build-staging.
+          if npm run | grep -q "build:staging"; then
+            CI=false npm run build:staging
+          else
+            echo "WARN: build:staging script not found. Copying production build to build-staging."
+            rm -rf build-staging && mkdir -p build-staging
+            cp -R build/* build-staging/
+          fi
 
       - name: Build Backend (Spring Boot)
         run: |
+          set -e
           cd backend
           mvn -B -q -DskipTests clean package
 
@@ -53,7 +64,7 @@ jobs:
     runs-on: ubuntu-latest
     if: >
       (github.ref == 'refs/heads/staging' && github.event_name == 'push') ||
-      (github.event_name == 'pull_request' && github.base_ref == 'staging' && 
+      (github.event_name == 'pull_request' && github.base_ref == 'staging' &&
        github.event.pull_request.head.repo.full_name == github.repository)
     environment: staging
 
@@ -86,30 +97,35 @@ jobs:
             set -e
             NGINX_ROOT="/var/www/html"
             STAGING_DIR="$NGINX_ROOT/staging"
-            SPRING_SERVICE="springboot-staging"
-            JAR_FILE="app-staging.jar"
+            SPRING_SERVICE_STG="springboot-staging"
+            JAR_FILE_STG="app-staging.jar"
+
             echo "== Staging deploy start =="
 
             echo "Contents of ~/staging:"
-            ls -la ~/staging
+            ls -la ~/staging || true
             echo "Contents of ~/staging/build-artifacts:"
-            ls -la ~/staging/build-artifacts
+            ls -la ~/staging/build-artifacts || true
             echo "Contents of ~/staging/build-artifacts/frontend:"
-            ls -la ~/staging/build-artifacts/frontend
+            ls -la ~/staging/build-artifacts/frontend || true
 
-            # Frontend
+            # ---- Frontend (STAGING) ----
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
-            sudo cp -r ~/staging/build-artifacts/frontend/build-staging/* "$STAGING_DIR"/
+            if [ -d ~/staging/build-artifacts/frontend/build-staging ]; then
+              sudo cp -r ~/staging/build-artifacts/frontend/build-staging/* "$STAGING_DIR"/
+            else
+              # fallback
+              sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_DIR"/
+            fi
             sudo chown -R www-data:www-data "$STAGING_DIR"
 
-            # Backend
+            # ---- Backend (STAGING) ----
             mkdir -p ~/staging/backend
-            cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
+            cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE_STG
 
-            # Create systemd service if missing
-            if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
-              sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
+            # Create or update systemd service for staging
+            sudo tee /etc/systemd/system/${SPRING_SERVICE_STG}.service > /dev/null <<EOF
             [Unit]
             Description=Spring Boot (staging)
             After=network.target
@@ -117,7 +133,7 @@ jobs:
             [Service]
             User=${{ secrets.EC2_USER }}
             WorkingDirectory=/home/${{ secrets.EC2_USER }}/staging
-            ExecStart=/usr/bin/java -jar $JAR_FILE --server.port=8081 --server.servlet.context-path=/staging
+            ExecStart=/usr/bin/java -jar $JAR_FILE_STG --server.port=8081 --server.servlet.context-path=/staging
             SuccessExitStatus=143
             Restart=always
             RestartSec=5
@@ -125,42 +141,62 @@ jobs:
             [Install]
             WantedBy=multi-user.target
             EOF
-              sudo systemctl daemon-reload
-              sudo systemctl enable ${SPRING_SERVICE}
-            fi
+            sudo systemctl daemon-reload
+            sudo systemctl enable ${SPRING_SERVICE_STG} || true
 
-            # Configure Nginx for staging
-            sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
+            # ---- Unified NGINX (one server for prod + staging) ----
+            sudo tee /etc/nginx/sites-available/app > /dev/null <<'EOF'
             server {
-                listen 80;
+                listen 80 default_server;
                 server_name _;
 
-                location /staging {
-                    alias $STAGING_DIR;
-                    try_files \$uri \$uri/ /staging/index.html;
+                # ---------- STAGING API ----------
+                location ^~ /staging/api/ {
+                    proxy_pass http://127.0.0.1:8081/;    # keep full path: /staging/api/...
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                 }
 
-                location /staging/api {
-                    proxy_pass http://localhost:8081/staging/api;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                # ---------- PRODUCTION API ----------
+                location ^~ /api/ {
+                    proxy_pass http://127.0.0.1:8080/api/; # keep /api/ path
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                }
+
+                # ---------- STAGING FRONTEND ----------
+                location /staging/ {
+                    alias /var/www/html/staging/;
+                    try_files $uri $uri/ /staging/index.html;
+                }
+
+                # ---------- PRODUCTION FRONTEND ----------
+                location / {
+                    root /var/www/html;
+                    try_files $uri $uri/ /index.html;
                 }
             }
             EOF
 
-            if [ ! -L "/etc/nginx/sites-enabled/staging" ]; then
-              sudo ln -s /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
-            fi
+            # Enable unified site and disable others/default
+            sudo ln -sf /etc/nginx/sites-available/app /etc/nginx/sites-enabled/app
+            # Clean any older site configs to avoid conflicts
+            [ -L /etc/nginx/sites-enabled/production ] && sudo rm /etc/nginx/sites-enabled/production || true
+            [ -L /etc/nginx/sites-enabled/staging ] && sudo rm /etc/nginx/sites-enabled/staging || true
+            [ -L /etc/nginx/sites-enabled/default ] && sudo rm /etc/nginx/sites-enabled/default || true
 
+            sudo nginx -t
             sudo systemctl restart nginx
-            sudo systemctl restart ${SPRING_SERVICE}
-            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
+            sudo systemctl restart ${SPRING_SERVICE_STG}
+            sudo systemctl status ${SPRING_SERVICE_STG} --no-pager -n 20 || true
 
             echo "== Staging deploy done =="
             echo "Staging URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging"
             echo "  Backend API: http://${{ secrets.EC2_HOST }}/staging/api"
+
   deploy-production:
     name: Deploy to PRODUCTION EC2
     needs: build
@@ -198,28 +234,31 @@ jobs:
             NGINX_ROOT="/var/www/html"
             SPRING_SERVICE="springboot"
             JAR_FILE="app.jar"
+
             echo "== Production deploy start =="
-            # Debug: List the contents of the app directory
+
             echo "Contents of ~/app:"
-            ls -la ~/app
+            ls -la ~/app || true
             echo "Contents of ~/app/build-artifacts:"
-            ls -la ~/app/build-artifacts
+            ls -la ~/app/build-artifacts || true
             echo "Contents of ~/app/build-artifacts/frontend:"
-            ls -la ~/app/build-artifacts/frontend
-            # Frontend
+            ls -la ~/app/build-artifacts/frontend || true
+
+            # ---- Frontend (PRODUCTION) ----
             sudo mkdir -p "$NGINX_ROOT"
             sudo rm -rf "$NGINX_ROOT"/*
             sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
-            
-            # Backend
+
+            # ---- Backend (PRODUCTION) ----
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
-            # Create systemd service if missing
-            if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
-              sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
+
+            # Create or update systemd service (prod)
+            sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
             [Unit]
             Description=Spring Boot (prod)
             After=network.target
+
             [Service]
             User=${{ secrets.EC2_USER }}
             WorkingDirectory=/home/${{ secrets.EC2_USER }}/app
@@ -227,43 +266,60 @@ jobs:
             SuccessExitStatus=143
             Restart=always
             RestartSec=5
+
             [Install]
             WantedBy=multi-user.target
             EOF
-              sudo systemctl daemon-reload
-              sudo systemctl enable ${SPRING_SERVICE}
-            fi
-            # Configure Nginx for production
-            sudo tee /etc/nginx/sites-available/production > /dev/null <<EOF
+            sudo systemctl daemon-reload
+            sudo systemctl enable ${SPRING_SERVICE} || true
+
+            # ---- Unified NGINX (same as staging deploy) ----
+            sudo tee /etc/nginx/sites-available/app > /dev/null <<'EOF'
             server {
-                listen 80;
+                listen 80 default_server;
                 server_name _;
-                location / {
-                    root $NGINX_ROOT;
-                    try_files \$uri \$uri/ /index.html;
+
+                # ---------- STAGING API ----------
+                location ^~ /staging/api/ {
+                    proxy_pass http://127.0.0.1:8081/;    # keep full path: /staging/api/...
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                 }
-                location /api {
-                    proxy_pass http://localhost:8080/api;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+
+                # ---------- PRODUCTION API ----------
+                location ^~ /api/ {
+                    proxy_pass http://127.0.0.1:8080/api/; # keep /api/ path
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                }
+
+                # ---------- STAGING FRONTEND ----------
+                location /staging/ {
+                    alias /var/www/html/staging/;
+                    try_files $uri $uri/ /staging/index.html;
+                }
+
+                # ---------- PRODUCTION FRONTEND ----------
+                location / {
+                    root /var/www/html;
+                    try_files $uri $uri/ /index.html;
                 }
             }
             EOF
-            
-            # Enable production site
-            if [ ! -L "/etc/nginx/sites-enabled/production" ]; then
-              sudo ln -s /etc/nginx/sites-available/production /etc/nginx/sites-enabled/
-            fi
-            
-            # Remove default site if exists
-            if [ -L "/etc/nginx/sites-enabled/default" ]; then
-              sudo rm /etc/nginx/sites-enabled/default
-            fi
-         
+
+            sudo ln -sf /etc/nginx/sites-available/app /etc/nginx/sites-enabled/app
+            # Clean any older site configs to avoid conflicts
+            [ -L /etc/nginx/sites-enabled/production ] && sudo rm /etc/nginx/sites-enabled/production || true
+            [ -L /etc/nginx/sites-enabled/staging ] && sudo rm /etc/nginx/sites-enabled/staging || true
+            [ -L /etc/nginx/sites-enabled/default ] && sudo rm /etc/nginx/sites-enabled/default || true
+
+            sudo nginx -t
             sudo systemctl restart nginx
             sudo systemctl restart ${SPRING_SERVICE}
-            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
+            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20 || true
+
             echo "== Production deploy done =="
             echo "Production URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}"
