@@ -94,7 +94,7 @@ jobs:
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
-            sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_DIR"/
+            sudo cp -r ~/staging/build-artifacts/frontend/build-staging/* "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Backend
