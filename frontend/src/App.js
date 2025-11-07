@@ -11,9 +11,11 @@ import UploadDocuments from "./auth/UploadDocuments";
 
 function App() {
   return (
-    <Router basename="/staging">    {/* ✅ This line is REQUIRED */}
+    <Router basename="/staging">
       <Routes>
-        <Route path="/" element={<PersonalDetails />} />
+        {/* ✅ This is the FIX — handles `/staging/` properly */}
+        <Route index element={<PersonalDetails />} />
+
         <Route path="/personal-details" element={<PersonalDetails />} />
         <Route path="/contact-details" element={<ContactDetails />} />
         <Route path="/bank-tax-details" element={<BankTaxDetails />} />
