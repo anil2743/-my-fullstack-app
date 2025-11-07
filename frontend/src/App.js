@@ -13,15 +13,18 @@ function App() {
   return (
     <Router basename="/staging">
       <Routes>
-        {/* ✅ This is the FIX — handles `/staging/` properly */}
+
+        {/* ✅ This line FIXES staging blank screen */}
         <Route index element={<PersonalDetails />} />
 
-        <Route path="/personal-details" element={<PersonalDetails />} />
-        <Route path="/contact-details" element={<ContactDetails />} />
-        <Route path="/bank-tax-details" element={<BankTaxDetails />} />
-        <Route path="/scheme-selection" element={<SchemeSelection />} />
-        <Route path="/nominee-details" element={<NomineeDetails />} />
-        <Route path="/upload-documents" element={<UploadDocuments />} />
+        {/* ✅ All normal routes */}
+        <Route path="personal-details" element={<PersonalDetails />} />
+        <Route path="contact-details" element={<ContactDetails />} />
+        <Route path="bank-tax-details" element={<BankTaxDetails />} />
+        <Route path="scheme-selection" element={<SchemeSelection />} />
+        <Route path="nominee-details" element={<NomineeDetails />} />
+        <Route path="upload-documents" element={<UploadDocuments />} />
+
       </Routes>
     </Router>
   );
