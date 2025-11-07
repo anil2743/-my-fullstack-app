@@ -19,6 +19,9 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+
+    "build:staging": "react-scripts build && mv build build-staging",
+
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
