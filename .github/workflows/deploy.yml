@@ -31,17 +31,22 @@ jobs:
           cd frontend
           npm ci
           CI=false npm run build
+          CI=false npm run build:staging || true
+
       - name: Build Backend (Spring Boot)
         run: |
           cd backend
           mvn -B -q -DskipTests clean package
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: site-and-jar
           path: |
             frontend/build
+            frontend/build-staging
             backend/target/*.jar
+
   deploy-staging:
     name: Deploy to STAGING EC2
     needs: build
@@ -84,28 +89,31 @@ jobs:
             SPRING_SERVICE="springboot-staging"
             JAR_FILE="app-staging.jar"
             echo "== Staging deploy start =="
-            # Debug: List the contents of the staging directory
+
             echo "Contents of ~/staging:"
             ls -la ~/staging
             echo "Contents of ~/staging/build-artifacts:"
             ls -la ~/staging/build-artifacts
             echo "Contents of ~/staging/build-artifacts/frontend:"
             ls -la ~/staging/build-artifacts/frontend
+
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
             sudo cp -r ~/staging/build-artifacts/frontend/build-staging/* "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
-            
+
             # Backend
             mkdir -p ~/staging/backend
             cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
+
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
               sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
             [Unit]
             Description=Spring Boot (staging)
             After=network.target
+
             [Service]
             User=${{ secrets.EC2_USER }}
             WorkingDirectory=/home/${{ secrets.EC2_USER }}/staging
@@ -113,21 +121,25 @@ jobs:
             SuccessExitStatus=143
             Restart=always
             RestartSec=5
+
             [Install]
             WantedBy=multi-user.target
             EOF
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
             fi
+
             # Configure Nginx for staging
             sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
             server {
                 listen 80;
                 server_name _;
+
                 location /staging {
                     alias $STAGING_DIR;
                     try_files \$uri \$uri/ /staging/index.html;
                 }
+
                 location /staging/api {
                     proxy_pass http://localhost:8081/staging/api;
                     proxy_set_header Host \$host;
@@ -136,15 +148,15 @@ jobs:
                 }
             }
             EOF
-            
-            # Enable staging site
+
             if [ ! -L "/etc/nginx/sites-enabled/staging" ]; then
               sudo ln -s /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
             fi
-            
+
             sudo systemctl restart nginx
             sudo systemctl restart ${SPRING_SERVICE}
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
+
             echo "== Staging deploy done =="
             echo "Staging URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging"
