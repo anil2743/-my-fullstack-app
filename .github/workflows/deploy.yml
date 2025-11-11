@@ -236,6 +236,9 @@ jobs:
             ls -la ~/app/build-artifacts
             echo "Contents of ~/app/build-artifacts/frontend:"
             ls -la ~/app/build-artifacts/frontend
+            echo "Contents of ~/app/build-artifacts/frontend/build:"
+            ls -la ~/app/build-artifacts/frontend/build
+            
             # Frontend - IMPORTANT: Preserve staging directory
             # Create a temporary backup of staging directory
             if [ -d "$NGINX_ROOT/staging" ]; then
@@ -252,9 +255,16 @@ jobs:
               sudo mv /tmp/staging-backup "$NGINX_ROOT/staging"
             fi
             
-            # Copy the production build
+            # Copy the production build - FIXED: Copy to correct location
             sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
+            
+            # Verify index.html exists
+            if [ ! -f "$NGINX_ROOT/index.html" ]; then
+              echo "ERROR: index.html not found in $NGINX_ROOT"
+              ls -la $NGINX_ROOT
+              exit 1
+            fi
             
             # Backend
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
@@ -317,6 +327,14 @@ jobs:
             if [ -L "/etc/nginx/sites-enabled/default" ]; then
               sudo rm /etc/nginx/sites-enabled/default
             fi
+            
+            # Test Nginx configuration
+            echo "Testing Nginx configuration..."
+            sudo nginx -t
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Nginx configuration test failed"
+              exit 1
+            fi
          
             sudo systemctl restart nginx
             sudo systemctl restart ${SPRING_SERVICE}
@@ -325,3 +343,5 @@ jobs:
             echo "Production URLs:"
             echo "  Frontend: https://banking.cyetechnology.com"
             echo "  Backend API: https://banking.cyetechnology.com/api"
+            echo "Contents of $NGINX_ROOT after deployment:"
+            ls -la $NGINX_ROOT
