@@ -253,7 +253,7 @@ jobs:
             echo "Contents of ~/app/build-artifacts/frontend/build:"
             ls -la ~/app/build-artifacts/frontend/build
             
-            # Remove all files in NGINX_ROOT except staging directory
+            # Remove all files in NGINX_ROOT except staging directory (preserves staging)
             sudo find "$NGINX_ROOT" -mindepth 1 -maxdepth 1 ! -name staging -exec rm -rf {} +
             
             # Copy the production build
