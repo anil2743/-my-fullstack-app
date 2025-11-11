@@ -107,8 +107,16 @@ jobs:
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
-            sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_DIR"/
+            # Use rsync for robust recursive copy
+            sudo rsync -av ~/staging/build-artifacts/frontend/build/ "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
+            # Debug post-copy
+            echo "Files in STAGING_DIR after rsync:"
+            ls -la "$STAGING_DIR"
+            echo "Contents of static if exists:"
+            ls -la "$STAGING_DIR"/static 2>/dev/null || echo "No static dir"
+            echo "Contents of static/css if exists:"
+            ls -la "$STAGING_DIR"/static/css 2>/dev/null || echo "No css dir"
             
             # Backend
             cp ~/staging/build-artifacts/*.jar ~/staging/$JAR_FILE || { echo "ERROR: JAR copy failed for staging"; exit 1; }
@@ -256,9 +264,17 @@ jobs:
             # Remove all files in NGINX_ROOT except staging directory (preserves staging)
             sudo find "$NGINX_ROOT" -mindepth 1 -maxdepth 1 ! -name staging -exec rm -rf {} +
             
-            # Copy the production build
-            sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
+            # Copy the production build with rsync for robust recursion
+            sudo rsync -av ~/app/build-artifacts/frontend/build/ "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
+            
+            # Debug post-rsync
+            echo "Files in NGINX_ROOT after rsync:"
+            ls -la "$NGINX_ROOT"
+            echo "Contents of static if exists:"
+            ls -la "$NGINX_ROOT"/static 2>/dev/null || echo "No static dir"
+            echo "Contents of static/css if exists:"
+            ls -la "$NGINX_ROOT"/static/css 2>/dev/null || echo "No css dir"
             
             # Verify index.html exists
             if [ ! -f "$NGINX_ROOT/index.html" ]; then
