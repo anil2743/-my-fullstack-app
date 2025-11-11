@@ -102,8 +102,8 @@ jobs:
             ls -la ~/staging/build-artifacts
             echo "Contents of ~/staging/build-artifacts/frontend:"
             ls -la ~/staging/build-artifacts/frontend
-            echo "Contents of ~/staging/build-artifacts/backend-jar:"
-            ls -la ~/staging/build-artifacts/backend-jar || echo "No backend-jar dir (expected if no JAR)"
+            echo "JAR files in build-artifacts:"
+            ls ~/staging/build-artifacts/*.jar || echo "No JAR found directly"
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
@@ -111,7 +111,7 @@ jobs:
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Backend
-            cp ~/staging/build-artifacts/backend-jar/*.jar ~/staging/$JAR_FILE || { echo "ERROR: JAR copy failed for staging"; exit 1; }
+            cp ~/staging/build-artifacts/*.jar ~/staging/$JAR_FILE || { echo "ERROR: JAR copy failed for staging"; exit 1; }
             if [ ! -f ~/staging/$JAR_FILE ]; then
               echo "ERROR: No JAR file found after copy for staging"
               exit 1
@@ -248,25 +248,13 @@ jobs:
             ls -la ~/app/build-artifacts
             echo "Contents of ~/app/build-artifacts/frontend:"
             ls -la ~/app/build-artifacts/frontend
-            echo "Contents of ~/app/build-artifacts/backend-jar:"
-            ls -la ~/app/build-artifacts/backend-jar || echo "No backend-jar dir (expected if no JAR)"
+            echo "JAR files in build-artifacts:"
+            ls ~/app/build-artifacts/*.jar || echo "No JAR found directly"
             echo "Contents of ~/app/build-artifacts/frontend/build:"
             ls -la ~/app/build-artifacts/frontend/build
             
-            # Backup staging directory if it exists
-            if [ -d "$NGINX_ROOT/staging" ]; then
-              echo "Backing up staging directory"
-              sudo cp -r "$NGINX_ROOT/staging" /tmp/staging-backup
-            fi
-            
             # Remove all files in NGINX_ROOT except staging directory
             sudo find "$NGINX_ROOT" -mindepth 1 -maxdepth 1 ! -name staging -exec rm -rf {} +
-            
-            # Restore staging directory if it existed
-            if [ -d /tmp/staging-backup ]; then
-              echo "Restoring staging directory"
-              sudo mv /tmp/staging-backup "$NGINX_ROOT/staging"
-            fi
             
             # Copy the production build
             sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
@@ -284,7 +272,7 @@ jobs:
             head -10 "$NGINX_ROOT/index.html"
             
             # Backend
-            cp ~/app/build-artifacts/backend-jar/*.jar ~/app/$JAR_FILE || { echo "ERROR: JAR copy failed for production"; exit 1; }
+            cp ~/app/build-artifacts/*.jar ~/app/$JAR_FILE || { echo "ERROR: JAR copy failed for production"; exit 1; }
             if [ ! -f ~/app/$JAR_FILE ]; then
               echo "ERROR: No JAR file found after copy for production"
               exit 1
