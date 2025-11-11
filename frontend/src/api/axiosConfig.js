@@ -1,15 +1,14 @@
-import axios from 'axios';
+import axios from "axios";
 
-const base =
-    window.location.href.includes("/staging")
-        ? "http://65.1.231.237/api"      // ✅ FIXED
-        : "http://65.1.231.237/api";     // ✅ SAME FOR PROD
+const base = window.location.href.includes("/staging")
+    ? "http://65.1.231.237/staging/api"                  // STAGING
+    : "https://banking.cyetechnology.com/api";          // PRODUCTION
 
 const api = axios.create({
     baseURL: base,
 });
 
-// Attach JWT
+// Attach JWT token automatically
 api.interceptors.request.use(
     (config) => {
         const token = localStorage.getItem("authToken");
