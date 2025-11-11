@@ -30,17 +30,33 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Build Frontend (React)
+      #########################################################
+      # ✅ FRONTEND BUILD (Different for staging & prod)
+      #########################################################
+      - name: Build Frontend
         run: |
           cd frontend
           npm ci
-          CI=false npm run build
 
+          if [ "${GITHUB_REF##*/}" = "staging" ]; then
+            echo "Building STAGING frontend..."
+            CI=false npm run build:staging
+          else
+            echo "Building PRODUCTION frontend..."
+            CI=false npm run build
+          fi
+
+      #########################################################
+      # ✅ BACKEND BUILD
+      #########################################################
       - name: Build Backend (Spring Boot)
         run: |
           cd backend
           mvn -B -q -DskipTests clean package
 
+      #########################################################
+      # ✅ Upload artifacts
+      #########################################################
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -87,17 +103,13 @@ jobs:
             STAGING_WEB="/var/www/html/staging"
 
             echo "==== Deploying STAGING ===="
-
-            # ✅ Frontend
             sudo mkdir -p "$STAGING_WEB"
             sudo rm -rf "$STAGING_WEB"/*
             sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_WEB"/
             sudo chown -R www-data:www-data "$STAGING_WEB"
 
-            # ✅ Backend JAR update
             cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/app-staging.jar
 
-            # ✅ Restart staging backend
             sudo systemctl restart staging
 
             echo "✅ STAGING DEPLOY COMPLETED"
@@ -140,16 +152,12 @@ jobs:
             PROD_WEB="/var/www/html"
 
             echo "==== Deploying PRODUCTION ===="
-
-            # ✅ Frontend update
             sudo rm -rf "$PROD_WEB"/*
             sudo cp -r ~/app/build-artifacts/frontend/build/* "$PROD_WEB"/
             sudo chown -R www-data:www-data "$PROD_WEB"
 
-            # ✅ Backend JAR update
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/app.jar
 
-            # ✅ Restart production backend
             sudo systemctl restart prod
 
             echo "✅ PRODUCTION DEPLOY COMPLETED"

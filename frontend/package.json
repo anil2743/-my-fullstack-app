@@ -18,9 +18,8 @@
   "scripts": {
     "start": "react-scripts start",
 
-    "build": "react-scripts build",
-
-    "build:staging": "react-scripts build && mv build build-staging",
+    "build": "react-scripts build",  
+    "build:staging": "PUBLIC_URL=/staging react-scripts build",
 
     "test": "react-scripts test",
     "eject": "react-scripts eject"
