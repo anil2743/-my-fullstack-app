@@ -60,6 +60,9 @@ jobs:
         run: |
           cd frontend
           npm ci
+          # Update package.json for staging
+          jq '.homepage = "http://'${{ secrets.EC2_HOST }}'/staging"' package.json > package.json.tmp
+          mv package.json.tmp package.json
           CI=false npm run build:staging
 
       - name: Prepare artifacts
@@ -198,6 +201,9 @@ jobs:
         run: |
           cd frontend
           npm ci
+          # Update package.json for production
+          jq '.homepage = "https://banking.cyetechnology.com"' package.json > package.json.tmp
+          mv package.json.tmp package.json
           CI=false npm run build:production
 
       - name: Prepare artifacts
