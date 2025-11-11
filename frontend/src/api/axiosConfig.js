@@ -2,8 +2,8 @@ import axios from 'axios';
 
 const base =
     window.location.href.includes("/staging")
-        ? "http://65.1.231.237/staging/api"
-        : "http://65.1.231.237/api";
+        ? "http://65.1.231.237/api"      // ✅ FIXED
+        : "http://65.1.231.237/api";     // ✅ SAME FOR PROD
 
 const api = axios.create({
     baseURL: base,
