@@ -105,7 +105,7 @@ jobs:
             echo "==== Deploying STAGING ===="
             sudo mkdir -p "$STAGING_WEB"
             sudo rm -rf "$STAGING_WEB"/*
-            sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_WEB"/
+            sudo cp -r ~/staging/build-artifacts/frontend/build-staging/* "$STAGING_WEB"/
             sudo chown -R www-data:www-data "$STAGING_WEB"
 
             cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/app-staging.jar
