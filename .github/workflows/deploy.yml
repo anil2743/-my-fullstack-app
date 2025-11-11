@@ -9,7 +9,7 @@ on:
 jobs:
 
   ###############################################################
-  # ✅ BUILD JOB (Frontend + Backend)
+  #  BUILD JOB
   ###############################################################
   build:
     name: Build frontend & backend
@@ -30,18 +30,15 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      ###########################################################
-      # ✅ FRONTEND BUILD (One common build for all)
-      ###########################################################
-      - name: Build Frontend
+      # ✅ Build frontend for BOTH staging and prod
+      - name: Build Frontend (React)
         run: |
           cd frontend
           npm ci
-          CI=false npm run build
+          npm run build:staging
+          npm run build:prod
 
-      ###########################################################
-      # ✅ BACKEND BUILD
-      ###########################################################
+      # ✅ Build backend
       - name: Build Backend (Spring Boot)
         run: |
           cd backend
@@ -52,11 +49,12 @@ jobs:
         with:
           name: site-and-jar
           path: |
-            frontend/build
+            frontend/build-staging
+            frontend/build-prod
             backend/target/*.jar
 
   ###############################################################
-  # ✅ STAGING DEPLOY
+  #  STAGING DEPLOY
   ###############################################################
   deploy-staging:
     name: Deploy to STAGING EC2
@@ -82,7 +80,7 @@ jobs:
           source: "build-artifacts"
           target: "/home/${{ secrets.EC2_USER }}/staging/"
 
-      - name: Deploy on EC2 (Staging)
+      - name: Deploy Staging
         uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -92,25 +90,19 @@ jobs:
             set -e
             STAGING_WEB="/var/www/html/staging"
 
-            echo "==== Deploying STAGING ===="
+            echo "=== Deploying STAGING ==="
 
-            # ✅ Frontend
-            sudo mkdir -p "$STAGING_WEB"
             sudo rm -rf "$STAGING_WEB"/*
-            sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_WEB"/
+            sudo cp -r ~/staging/build-artifacts/frontend/build-staging/* "$STAGING_WEB"/
             sudo chown -R www-data:www-data "$STAGING_WEB"
 
-            # ✅ Backend JAR update
             cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/app-staging.jar
-
-            # ✅ Restart staging backend
             sudo systemctl restart staging
 
-            echo "✅ STAGING DEPLOY COMPLETED"
-            echo "URL: http://${{ secrets.EC2_HOST }}/staging"
+            echo "✅ STAGING DEPLOY done"
 
   ###############################################################
-  # ✅ PRODUCTION DEPLOY
+  #  PRODUCTION DEPLOY
   ###############################################################
   deploy-production:
     name: Deploy to PRODUCTION EC2
@@ -135,7 +127,7 @@ jobs:
           source: "build-artifacts"
           target: "/home/${{ secrets.EC2_USER }}/app/"
 
-      - name: Deploy on EC2 (Production)
+      - name: Deploy Production
         uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -145,18 +137,14 @@ jobs:
             set -e
             PROD_WEB="/var/www/html"
 
-            echo "==== Deploying PRODUCTION ===="
+            echo "=== Deploying PRODUCTION ==="
 
-            # ✅ Frontend update
             sudo rm -rf "$PROD_WEB"/*
-            sudo cp -r ~/app/build-artifacts/frontend/build/* "$PROD_WEB"/
+            sudo cp -r ~/app/build-artifacts/frontend/build-prod/* "$PROD_WEB"/
             sudo chown -R www-data:www-data "$PROD_WEB"
 
-            # ✅ Backend JAR update
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/app.jar
-
-            # ✅ Restart production backend
             sudo systemctl restart prod
 
-            echo "✅ PRODUCTION DEPLOY COMPLETED"
-            echo "URL: https://banking.cyetechnology.com"
+            echo "✅ PRODUCTION DEPLOY done"
+            echo "✅ URL: https://banking.cyetechnology.com"
