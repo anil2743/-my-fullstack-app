@@ -92,6 +92,9 @@ jobs:
 
             echo "=== Deploying STAGING ==="
 
+            # Create directory if it doesn't exist
+            sudo mkdir -p "$STAGING_WEB"
+            
             sudo rm -rf "$STAGING_WEB"/*
             sudo cp -r ~/staging/build-artifacts/frontend/build-staging/* "$STAGING_WEB"/
             sudo chown -R www-data:www-data "$STAGING_WEB"
@@ -135,16 +138,23 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
-            PROD_WEB="/var/www/html"
+            PROD_WEB="/var/www/html/production"
 
             echo "=== Deploying PRODUCTION ==="
 
+            # Create directory if it doesn't exist
+            sudo mkdir -p "$PROD_WEB"
+            
             sudo rm -rf "$PROD_WEB"/*
             sudo cp -r ~/app/build-artifacts/frontend/build-prod/* "$PROD_WEB"/
             sudo chown -R www-data:www-data "$PROD_WEB"
 
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/app.jar
             sudo systemctl restart prod
+
+            # Update Nginx configuration for production
+            sudo sed -i 's|root /var/www/html;|root /var/www/html/production;|g' /etc/nginx/sites-available/banking
+            sudo nginx -t && sudo systemctl reload nginx
 
             echo "✅ PRODUCTION DEPLOY done"
             echo "✅ URL: https://banking.cyetechnology.com"
