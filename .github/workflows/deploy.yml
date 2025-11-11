@@ -8,17 +8,12 @@ on:
 
 jobs:
   build:
-    name: Build frontend & backend
+    name: Build backend
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -26,21 +21,15 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Build Frontend (React)
-        run: |
-          cd frontend
-          npm ci
-          CI=false npm run build
       - name: Build Backend (Spring Boot)
         run: |
           cd backend
           mvn -B -q -DskipTests clean package
-      - name: Upload artifacts
+      - name: Upload backend artifact
         uses: actions/upload-artifact@v4
         with:
-          name: site-and-jar
+          name: backend-jar
           path: |
-            frontend/build
             backend/target/*.jar
   deploy-staging:
     name: Deploy to STAGING EC2
@@ -53,13 +42,35 @@ jobs:
     environment: staging
 
     steps:
-      - name: Download artifacts
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Download backend artifact
         uses: actions/download-artifact@v4
         with:
-          name: site-and-jar
+          name: backend-jar
           path: ./build-artifacts
 
-      - name: List downloaded files
+      - name: Build Frontend (Staging)
+        run: |
+          cd frontend
+          npm ci
+          # Update package.json for staging
+          jq '.homepage = "http://'${{ secrets.EC2_HOST }}'/staging"' package.json > package.json.tmp
+          mv package.json.tmp package.json
+          CI=false npm run build:staging
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p build-artifacts/frontend
+          cp -r frontend/build build-artifacts/frontend/
+
+      - name: List artifacts
         run: ls -laR ./build-artifacts
 
       - name: Copy to EC2 (staging)
@@ -91,6 +102,8 @@ jobs:
             ls -la ~/staging/build-artifacts
             echo "Contents of ~/staging/build-artifacts/frontend:"
             ls -la ~/staging/build-artifacts/frontend
+            echo "Contents of ~/staging/build-artifacts/backend-jar:"
+            ls -la ~/staging/build-artifacts/backend-jar || echo "No backend-jar dir (expected if no JAR)"
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
@@ -98,8 +111,12 @@ jobs:
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Backend
-            mkdir -p ~/staging/backend
-            cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
+            cp ~/staging/build-artifacts/backend-jar/*.jar ~/staging/$JAR_FILE || { echo "ERROR: JAR copy failed for staging"; exit 1; }
+            if [ ! -f ~/staging/$JAR_FILE ]; then
+              echo "ERROR: No JAR file found after copy for staging"
+              exit 1
+            fi
+            echo "Copied JAR: $(ls -la ~/staging/$JAR_FILE)"
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
               sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
@@ -109,7 +126,7 @@ jobs:
             [Service]
             User=${{ secrets.EC2_USER }}
             WorkingDirectory=/home/${{ secrets.EC2_USER }}/staging
-            ExecStart=/usr/bin/java -jar $JAR_FILE --server.port=8081 --server.servlet.context-path=/staging
+            ExecStart=/usr/bin/java -jar $JAR_FILE --server.port=8081
             SuccessExitStatus=143
             Restart=always
             RestartSec=5
@@ -122,17 +139,32 @@ jobs:
             # Configure Nginx for staging
             sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
             server {
-                listen 80;
+                listen 80 default_server;
                 server_name _;
-                location /staging {
-                    alias $STAGING_DIR;
-                    try_files \$uri \$uri/ /staging/index.html;
-                }
-                location /staging/api {
-                    proxy_pass http://localhost:8081/staging/api;
+
+                # ============================
+                # STAGING API
+                # ============================
+                location ^~ /staging/api/ {
+                    proxy_pass http://127.0.0.1:8081;
                     proxy_set_header Host \$host;
                     proxy_set_header X-Real-IP \$remote_addr;
                     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                }
+
+                # ============================
+                # FIX: EXACT MATCH /staging → redirect to /staging/
+                # ============================
+                location = /staging {
+                    return 302 /staging/;
+                }
+
+                # ============================
+                # STAGING FRONTEND
+                # ============================
+                location ^~ /staging/ {
+                    alias /var/www/html/staging/;
+                    try_files \$uri \$uri/ /staging/index.html;
                 }
             }
             EOF
@@ -157,13 +189,35 @@ jobs:
     environment: production
 
     steps:
-      - name: Download artifacts
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Download backend artifact
         uses: actions/download-artifact@v4
         with:
-          name: site-and-jar
+          name: backend-jar
           path: ./build-artifacts
 
-      - name: List downloaded files
+      - name: Build Frontend (Production)
+        run: |
+          cd frontend
+          npm ci
+          # Update package.json for production
+          jq '.homepage = "https://banking.cyetechnology.com"' package.json > package.json.tmp
+          mv package.json.tmp package.json
+          CI=false npm run build:production
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p build-artifacts/frontend
+          cp -r frontend/build build-artifacts/frontend/
+
+      - name: List artifacts
         run: ls -laR ./build-artifacts
 
       - name: Copy to EC2 (prod)
@@ -194,14 +248,48 @@ jobs:
             ls -la ~/app/build-artifacts
             echo "Contents of ~/app/build-artifacts/frontend:"
             ls -la ~/app/build-artifacts/frontend
-            # Frontend
-            sudo mkdir -p "$NGINX_ROOT"
-            sudo rm -rf "$NGINX_ROOT"/*
+            echo "Contents of ~/app/build-artifacts/backend-jar:"
+            ls -la ~/app/build-artifacts/backend-jar || echo "No backend-jar dir (expected if no JAR)"
+            echo "Contents of ~/app/build-artifacts/frontend/build:"
+            ls -la ~/app/build-artifacts/frontend/build
+            
+            # Backup staging directory if it exists
+            if [ -d "$NGINX_ROOT/staging" ]; then
+              echo "Backing up staging directory"
+              sudo cp -r "$NGINX_ROOT/staging" /tmp/staging-backup
+            fi
+            
+            # Remove all files in NGINX_ROOT except staging directory
+            sudo find "$NGINX_ROOT" -mindepth 1 -maxdepth 1 ! -name staging -exec rm -rf {} +
+            
+            # Restore staging directory if it existed
+            if [ -d /tmp/staging-backup ]; then
+              echo "Restoring staging directory"
+              sudo mv /tmp/staging-backup "$NGINX_ROOT/staging"
+            fi
+            
+            # Copy the production build
             sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
+            # Verify index.html exists
+            if [ ! -f "$NGINX_ROOT/index.html" ]; then
+              echo "ERROR: index.html not found in $NGINX_ROOT"
+              ls -la $NGINX_ROOT
+              exit 1
+            fi
+            
+            # Check the content of index.html
+            echo "Content of index.html:"
+            head -10 "$NGINX_ROOT/index.html"
+            
             # Backend
-            cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
+            cp ~/app/build-artifacts/backend-jar/*.jar ~/app/$JAR_FILE || { echo "ERROR: JAR copy failed for production"; exit 1; }
+            if [ ! -f ~/app/$JAR_FILE ]; then
+              echo "ERROR: No JAR file found after copy for production"
+              exit 1
+            fi
+            echo "Copied JAR: $(ls -la ~/app/$JAR_FILE)"
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
               sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
@@ -221,32 +309,66 @@ jobs:
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
             fi
-            # Configure Nginx for production
-            sudo tee /etc/nginx/sites-available/production > /dev/null <<EOF
+            # Configure Nginx for production - FIXED to use correct root directory
+            sudo tee /etc/nginx/sites-available/banking > /dev/null <<EOF
             server {
-                listen 80;
-                server_name _;
+                server_name banking.cyetechnology.com;
+
                 location / {
-                    root $NGINX_ROOT;
+                    root /var/www/html;
+                    index index.html;
                     try_files \$uri \$uri/ /index.html;
+                    expires -1;
+                    add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
                 }
-                location /api {
-                    proxy_pass http://localhost:8080/api;
+
+                location ^~ /api/ {
+                    proxy_pass http://127.0.0.1:8080;
                     proxy_set_header Host \$host;
                     proxy_set_header X-Real-IP \$remote_addr;
                     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
                 }
+
+                # Static assets caching
+                location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+                    root /var/www/html;
+                    expires 1y;
+                    add_header Cache-Control "public, immutable";
+                }
+
+                listen 443 ssl; # managed by Certbot
+                ssl_certificate /etc/letsencrypt/live/banking.cyetechnology.com/fullchain.pem; # managed by Certbot
+                ssl_certificate_key /etc/letsencrypt/live/banking.cyetechnology.com/privkey.pem; # managed by Certbot
+                include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+                ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+            }
+            server {
+                if (\$host = banking.cyetechnology.com) {
+                    return 301 https://\$host\$request_uri;
+                } # managed by Certbot
+
+                listen 80;
+                server_name banking.cyetechnology.com;
+                return 404; # managed by Certbot
             }
             EOF
             
             # Enable production site
-            if [ ! -L "/etc/nginx/sites-enabled/production" ]; then
-              sudo ln -s /etc/nginx/sites-available/production /etc/nginx/sites-enabled/
+            if [ ! -L "/etc/nginx/sites-enabled/banking" ]; then
+              sudo ln -s /etc/nginx/sites-available/banking /etc/nginx/sites-enabled/
             fi
             
             # Remove default site if exists
             if [ -L "/etc/nginx/sites-enabled/default" ]; then
               sudo rm /etc/nginx/sites-enabled/default
+            fi
+            
+            # Test Nginx configuration
+            echo "Testing Nginx configuration..."
+            sudo nginx -t
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Nginx configuration test failed"
+              exit 1
             fi
          
             sudo systemctl restart nginx
@@ -254,5 +376,9 @@ jobs:
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
             echo "== Production deploy done =="
             echo "Production URLs:"
-            echo "  Frontend: http://${{ secrets.EC2_HOST }}"
-            echo "  Backend API: http://${{ secrets.EC2_HOST }}/api"
+            echo "  Frontend: https://banking.cyetechnology.com"
+            echo "  Backend API: https://banking.cyetechnology.com/api"
+            echo "Contents of $NGINX_ROOT after deployment:"
+            ls -la $NGINX_ROOT
+            echo "Verifying index.html is accessible:"
+            curl -I https://banking.cyetechnology.com
