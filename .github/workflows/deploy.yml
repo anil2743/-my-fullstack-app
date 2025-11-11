@@ -271,6 +271,10 @@ jobs:
               exit 1
             fi
             
+            # Check the content of index.html
+            echo "Content of index.html:"
+            head -10 "$NGINX_ROOT/index.html"
+            
             # Backend
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
             # Create systemd service if missing
