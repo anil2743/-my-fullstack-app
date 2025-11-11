@@ -30,19 +30,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # ✅ Separate build commands for staging & production
+      ###########################################################
+      # ✅ FRONTEND BUILD (One common build for all)
+      ###########################################################
       - name: Build Frontend
         run: |
           cd frontend
           npm ci
-          if [[ "${GITHUB_REF_NAME}" == "staging" ]]; then
-            echo "Building STAGING frontend..."
-            CI=false npm run build:staging
-          else
-            echo "Building PRODUCTION frontend..."
-            CI=false npm run build
-          fi
+          CI=false npm run build
 
+      ###########################################################
+      # ✅ BACKEND BUILD
+      ###########################################################
       - name: Build Backend (Spring Boot)
         run: |
           cd backend
@@ -95,15 +94,20 @@ jobs:
 
             echo "==== Deploying STAGING ===="
 
+            # ✅ Frontend
             sudo mkdir -p "$STAGING_WEB"
             sudo rm -rf "$STAGING_WEB"/*
             sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_WEB"/
             sudo chown -R www-data:www-data "$STAGING_WEB"
 
+            # ✅ Backend JAR update
             cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/app-staging.jar
+
+            # ✅ Restart staging backend
             sudo systemctl restart staging
 
             echo "✅ STAGING DEPLOY COMPLETED"
+            echo "URL: http://${{ secrets.EC2_HOST }}/staging"
 
   ###############################################################
   # ✅ PRODUCTION DEPLOY
@@ -112,7 +116,7 @@ jobs:
     name: Deploy to PRODUCTION EC2
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && 
+    if: github.event_name == 'push' &&
         (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
 
     steps:
@@ -143,11 +147,15 @@ jobs:
 
             echo "==== Deploying PRODUCTION ===="
 
+            # ✅ Frontend update
             sudo rm -rf "$PROD_WEB"/*
             sudo cp -r ~/app/build-artifacts/frontend/build/* "$PROD_WEB"/
             sudo chown -R www-data:www-data "$PROD_WEB"
 
+            # ✅ Backend JAR update
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/app.jar
+
+            # ✅ Restart production backend
             sudo systemctl restart prod
 
             echo "✅ PRODUCTION DEPLOY COMPLETED"
