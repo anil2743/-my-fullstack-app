@@ -7,7 +7,6 @@ on:
     branches: [ staging ]
 
 jobs:
-
   ###############################################################
   #  BUILD JOB
   ###############################################################
@@ -89,13 +88,17 @@ jobs:
           script: |
             set -e
             STAGING_WEB="/var/www/html/staging"
+            mkdir -p "$STAGING_WEB"
+            mkdir -p ~/staging
 
             echo "=== Deploying STAGING ==="
 
+            # Clean only the web files inside /staging/, not the directory itself
             sudo rm -rf "$STAGING_WEB"/*
             sudo cp -r ~/staging/build-artifacts/frontend/build-staging/* "$STAGING_WEB"/
             sudo chown -R www-data:www-data "$STAGING_WEB"
 
+            # Update staging jar
             cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/app-staging.jar
             sudo systemctl restart staging
 
@@ -136,19 +139,26 @@ jobs:
           script: |
             set -e
             PROD_WEB="/var/www/html"
+            mkdir -p "$PROD_WEB"
+            mkdir -p ~/app
 
             echo "=== Deploying PRODUCTION ==="
 
-            # KEY FIX: Only delete files in the root directory, not subdirectories
+            # ⚠️ DO NOT remove the /staging folder
+            # Delete only files and symlinks in the root of /var/www/html
             sudo find "$PROD_WEB" -maxdepth 1 -type f -delete
             sudo find "$PROD_WEB" -maxdepth 1 -type l -delete
-            
-            # Copy new files
+
+            # Copy new production build
             sudo cp -r ~/app/build-artifacts/frontend/build-prod/* "$PROD_WEB"/
             sudo chown -R www-data:www-data "$PROD_WEB"
 
+            # Update prod jar
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/app.jar
             sudo systemctl restart prod
+
+            # Optional: quick nginx reload if configs changed
+            sudo nginx -t && sudo systemctl reload nginx || true
 
             echo "✅ PRODUCTION DEPLOY done"
             echo "✅ URL: https://banking.cyetechnology.com"
