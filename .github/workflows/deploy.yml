@@ -30,15 +30,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      #########################################################
-      # ✅ FRONTEND BUILD (Different for staging & prod)
-      #########################################################
+      # ✅ Separate build commands for staging & production
       - name: Build Frontend
         run: |
           cd frontend
           npm ci
-
-          if [ "${GITHUB_REF##*/}" = "staging" ]; then
+          if [[ "${GITHUB_REF_NAME}" == "staging" ]]; then
             echo "Building STAGING frontend..."
             CI=false npm run build:staging
           else
@@ -46,17 +43,11 @@ jobs:
             CI=false npm run build
           fi
 
-      #########################################################
-      # ✅ BACKEND BUILD
-      #########################################################
       - name: Build Backend (Spring Boot)
         run: |
           cd backend
           mvn -B -q -DskipTests clean package
 
-      #########################################################
-      # ✅ Upload artifacts
-      #########################################################
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -103,17 +94,16 @@ jobs:
             STAGING_WEB="/var/www/html/staging"
 
             echo "==== Deploying STAGING ===="
+
             sudo mkdir -p "$STAGING_WEB"
             sudo rm -rf "$STAGING_WEB"/*
-            sudo cp -r ~/staging/build-artifacts/frontend/build-staging/* "$STAGING_WEB"/
+            sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_WEB"/
             sudo chown -R www-data:www-data "$STAGING_WEB"
 
             cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/app-staging.jar
-
             sudo systemctl restart staging
 
             echo "✅ STAGING DEPLOY COMPLETED"
-            echo "URL: http://${{ secrets.EC2_HOST }}/staging"
 
   ###############################################################
   # ✅ PRODUCTION DEPLOY
@@ -152,12 +142,12 @@ jobs:
             PROD_WEB="/var/www/html"
 
             echo "==== Deploying PRODUCTION ===="
+
             sudo rm -rf "$PROD_WEB"/*
             sudo cp -r ~/app/build-artifacts/frontend/build/* "$PROD_WEB"/
             sudo chown -R www-data:www-data "$PROD_WEB"
 
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/app.jar
-
             sudo systemctl restart prod
 
             echo "✅ PRODUCTION DEPLOY COMPLETED"
