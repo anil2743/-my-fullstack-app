@@ -88,13 +88,10 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
-            STAGING_WEB="/var/www/staging"
+            STAGING_WEB="/var/www/html/staging"
 
             echo "=== Deploying STAGING ==="
 
-            # Create directory if it doesn't exist
-            sudo mkdir -p "$STAGING_WEB"
-            
             sudo rm -rf "$STAGING_WEB"/*
             sudo cp -r ~/staging/build-artifacts/frontend/build-staging/* "$STAGING_WEB"/
             sudo chown -R www-data:www-data "$STAGING_WEB"
@@ -138,14 +135,15 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
-            PROD_WEB="/var/www/production"
+            PROD_WEB="/var/www/html"
 
             echo "=== Deploying PRODUCTION ==="
 
-            # Create directory if it doesn't exist
-            sudo mkdir -p "$PROD_WEB"
+            # KEY FIX: Only delete files in the root directory, not subdirectories
+            sudo find "$PROD_WEB" -maxdepth 1 -type f -delete
+            sudo find "$PROD_WEB" -maxdepth 1 -type l -delete
             
-            sudo rm -rf "$PROD_WEB"/*
+            # Copy new files
             sudo cp -r ~/app/build-artifacts/frontend/build-prod/* "$PROD_WEB"/
             sudo chown -R www-data:www-data "$PROD_WEB"
 
