@@ -88,7 +88,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
-            STAGING_WEB="/var/www/html/staging"
+            STAGING_WEB="/var/www/staging"
 
             echo "=== Deploying STAGING ==="
 
@@ -138,7 +138,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
-            PROD_WEB="/var/www/html/production"
+            PROD_WEB="/var/www/production"
 
             echo "=== Deploying PRODUCTION ==="
 
@@ -151,10 +151,6 @@ jobs:
 
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/app.jar
             sudo systemctl restart prod
-
-            # Update Nginx configuration for production
-            sudo sed -i 's|root /var/www/html;|root /var/www/html/production;|g' /etc/nginx/sites-available/banking
-            sudo nginx -t && sudo systemctl reload nginx
 
             echo "✅ PRODUCTION DEPLOY done"
             echo "✅ URL: https://banking.cyetechnology.com"
