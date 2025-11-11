@@ -226,6 +226,7 @@ jobs:
           script: |
             set -e
             NGINX_ROOT="/var/www/html"
+            PROD_DIR="$NGINX_ROOT/banking"  # Changed to dedicated banking directory
             SPRING_SERVICE="springboot"
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
@@ -239,32 +240,22 @@ jobs:
             echo "Contents of ~/app/build-artifacts/frontend/build:"
             ls -la ~/app/build-artifacts/frontend/build
             
-            # Frontend - IMPORTANT: Preserve staging directory
-            # Create a temporary backup of staging directory
-            if [ -d "$NGINX_ROOT/staging" ]; then
-              echo "Backing up staging directory"
-              sudo cp -r "$NGINX_ROOT/staging" /tmp/staging-backup
-            fi
-            
-            # Remove all files in NGINX_ROOT except staging directory
-            sudo find "$NGINX_ROOT" -mindepth 1 -maxdepth 1 ! -name staging -exec rm -rf {} +
-            
-            # Restore staging directory if it existed
-            if [ -d /tmp/staging-backup ]; then
-              echo "Restoring staging directory"
-              sudo mv /tmp/staging-backup "$NGINX_ROOT/staging"
-            fi
-            
-            # Copy the production build - FIXED: Copy to correct location
-            sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
-            sudo chown -R www-data:www-data "$NGINX_ROOT"
+            # Create dedicated banking directory for production
+            sudo mkdir -p "$PROD_DIR"
+            sudo rm -rf "$PROD_DIR"/*
+            sudo cp -r ~/app/build-artifacts/frontend/build/* "$PROD_DIR"/
+            sudo chown -R www-data:www-data "$PROD_DIR"
             
             # Verify index.html exists
-            if [ ! -f "$NGINX_ROOT/index.html" ]; then
-              echo "ERROR: index.html not found in $NGINX_ROOT"
-              ls -la $NGINX_ROOT
+            if [ ! -f "$PROD_DIR/index.html" ]; then
+              echo "ERROR: index.html not found in $PROD_DIR"
+              ls -la $PROD_DIR
               exit 1
             fi
+            
+            # Check index.html content
+            echo "Checking index.html content:"
+            head -20 "$PROD_DIR/index.html"
             
             # Backend
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
@@ -287,18 +278,31 @@ jobs:
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
             fi
-            # Configure Nginx for production
+            # Configure Nginx for production - FIXED to use dedicated directory
             sudo tee /etc/nginx/sites-available/banking > /dev/null <<EOF
             server {
                 server_name banking.cyetechnology.com;
 
                 location / {
-                    root /var/www/html;
+                    root /var/www/html/banking;
+                    index index.html;
                     try_files \$uri \$uri/ /index.html;
+                    expires -1;
+                    add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
                 }
 
                 location ^~ /api/ {
                     proxy_pass http://127.0.0.1:8080;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                }
+
+                # Static assets caching
+                location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+                    root /var/www/html/banking;
+                    expires 1y;
+                    add_header Cache-Control "public, immutable";
                 }
 
                 listen 443 ssl; # managed by Certbot
@@ -343,5 +347,7 @@ jobs:
             echo "Production URLs:"
             echo "  Frontend: https://banking.cyetechnology.com"
             echo "  Backend API: https://banking.cyetechnology.com/api"
-            echo "Contents of $NGINX_ROOT after deployment:"
-            ls -la $NGINX_ROOT
+            echo "Contents of $PROD_DIR after deployment:"
+            ls -la $PROD_DIR
+            echo "Verifying index.html is accessible:"
+            curl -I https://banking.cyetechnology.com
