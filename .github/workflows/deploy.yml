@@ -226,7 +226,6 @@ jobs:
           script: |
             set -e
             NGINX_ROOT="/var/www/html"
-            PROD_DIR="$NGINX_ROOT/banking"  # Changed to dedicated banking directory
             SPRING_SERVICE="springboot"
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
@@ -240,22 +239,31 @@ jobs:
             echo "Contents of ~/app/build-artifacts/frontend/build:"
             ls -la ~/app/build-artifacts/frontend/build
             
-            # Create dedicated banking directory for production
-            sudo mkdir -p "$PROD_DIR"
-            sudo rm -rf "$PROD_DIR"/*
-            sudo cp -r ~/app/build-artifacts/frontend/build/* "$PROD_DIR"/
-            sudo chown -R www-data:www-data "$PROD_DIR"
-            
-            # Verify index.html exists
-            if [ ! -f "$PROD_DIR/index.html" ]; then
-              echo "ERROR: index.html not found in $PROD_DIR"
-              ls -la $PROD_DIR
-              exit 1
+            # Backup staging directory if it exists
+            if [ -d "$NGINX_ROOT/staging" ]; then
+              echo "Backing up staging directory"
+              sudo cp -r "$NGINX_ROOT/staging" /tmp/staging-backup
             fi
             
-            # Check index.html content
-            echo "Checking index.html content:"
-            head -20 "$PROD_DIR/index.html"
+            # Remove all files in NGINX_ROOT except staging directory
+            sudo find "$NGINX_ROOT" -mindepth 1 -maxdepth 1 ! -name staging -exec rm -rf {} +
+            
+            # Restore staging directory if it existed
+            if [ -d /tmp/staging-backup ]; then
+              echo "Restoring staging directory"
+              sudo mv /tmp/staging-backup "$NGINX_ROOT/staging"
+            fi
+            
+            # Copy the production build
+            sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
+            sudo chown -R www-data:www-data "$NGINX_ROOT"
+            
+            # Verify index.html exists
+            if [ ! -f "$NGINX_ROOT/index.html" ]; then
+              echo "ERROR: index.html not found in $NGINX_ROOT"
+              ls -la $NGINX_ROOT
+              exit 1
+            fi
             
             # Backend
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
@@ -278,13 +286,13 @@ jobs:
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
             fi
-            # Configure Nginx for production - FIXED to use dedicated directory
+            # Configure Nginx for production - FIXED to use correct root directory
             sudo tee /etc/nginx/sites-available/banking > /dev/null <<EOF
             server {
                 server_name banking.cyetechnology.com;
 
                 location / {
-                    root /var/www/html/banking;
+                    root /var/www/html;
                     index index.html;
                     try_files \$uri \$uri/ /index.html;
                     expires -1;
@@ -300,7 +308,7 @@ jobs:
 
                 # Static assets caching
                 location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
-                    root /var/www/html/banking;
+                    root /var/www/html;
                     expires 1y;
                     add_header Cache-Control "public, immutable";
                 }
@@ -347,7 +355,7 @@ jobs:
             echo "Production URLs:"
             echo "  Frontend: https://banking.cyetechnology.com"
             echo "  Backend API: https://banking.cyetechnology.com/api"
-            echo "Contents of $PROD_DIR after deployment:"
-            ls -la $PROD_DIR
+            echo "Contents of $NGINX_ROOT after deployment:"
+            ls -la $NGINX_ROOT
             echo "Verifying index.html is accessible:"
             curl -I https://banking.cyetechnology.com
