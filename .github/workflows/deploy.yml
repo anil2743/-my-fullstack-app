@@ -236,9 +236,23 @@ jobs:
             ls -la ~/app/build-artifacts
             echo "Contents of ~/app/build-artifacts/frontend:"
             ls -la ~/app/build-artifacts/frontend
-            # Frontend
-            sudo mkdir -p "$NGINX_ROOT"
-            sudo rm -rf "$NGINX_ROOT"/*
+            # Frontend - IMPORTANT: Preserve staging directory
+            # Create a temporary backup of staging directory
+            if [ -d "$NGINX_ROOT/staging" ]; then
+              echo "Backing up staging directory"
+              sudo cp -r "$NGINX_ROOT/staging" /tmp/staging-backup
+            fi
+            
+            # Remove all files in NGINX_ROOT except staging directory
+            sudo find "$NGINX_ROOT" -mindepth 1 -maxdepth 1 ! -name staging -exec rm -rf {} +
+            
+            # Restore staging directory if it existed
+            if [ -d /tmp/staging-backup ]; then
+              echo "Restoring staging directory"
+              sudo mv /tmp/staging-backup "$NGINX_ROOT/staging"
+            fi
+            
+            # Copy the production build
             sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
