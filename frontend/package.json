@@ -16,16 +16,17 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "start": "react-scripts start",
-
+    "start": "react-scripts start",  
     "build": "react-scripts build",  
-    "build:staging": "PUBLIC_URL=/staging react-scripts build && mv build build-staging",
-
+    "build:staging": "PUBLIC_URL=/staging react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {
-    "extends": ["react-app", "react-app/jest"]
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
   },
   "browserslist": {
     "production": [
