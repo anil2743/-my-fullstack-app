@@ -7,13 +7,9 @@ on:
     branches: [ staging ]
 
 jobs:
-  ###############################################################
-  #  BUILD JOB
-  ###############################################################
   build:
     name: Build frontend & backend
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -29,21 +25,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # ✅ Build frontend for BOTH staging and prod
-      - name: Build Frontend (React)
+      - name: Build Frontend
         run: |
           cd frontend
           npm ci
           npm run build:staging
           npm run build:prod
 
-      # ✅ Build backend
-      - name: Build Backend (Spring Boot)
+      - name: Build Backend
         run: |
           cd backend
           mvn -B -q -DskipTests clean package
 
-      - name: Upload artifacts
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: site-and-jar
@@ -52,9 +46,6 @@ jobs:
             frontend/build-prod
             backend/target/*.jar
 
-  ###############################################################
-  #  STAGING DEPLOY
-  ###############################################################
   deploy-staging:
     name: Deploy to STAGING EC2
     needs: build
@@ -88,25 +79,12 @@ jobs:
           script: |
             set -e
             STAGING_WEB="/var/www/html/staging"
-            mkdir -p "$STAGING_WEB"
-            mkdir -p ~/staging
-
-            echo "=== Deploying STAGING ==="
-
-            # Clean only the web files inside /staging/, not the directory itself
             sudo rm -rf "$STAGING_WEB"/*
             sudo cp -r ~/staging/build-artifacts/frontend/build-staging/* "$STAGING_WEB"/
             sudo chown -R www-data:www-data "$STAGING_WEB"
-
-            # Update staging jar
             cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/app-staging.jar
             sudo systemctl restart staging
 
-            echo "✅ STAGING DEPLOY done"
-
-  ###############################################################
-  #  PRODUCTION DEPLOY
-  ###############################################################
   deploy-production:
     name: Deploy to PRODUCTION EC2
     needs: build
@@ -139,26 +117,9 @@ jobs:
           script: |
             set -e
             PROD_WEB="/var/www/html"
-            mkdir -p "$PROD_WEB"
-            mkdir -p ~/app
-
-            echo "=== Deploying PRODUCTION ==="
-
-            # ⚠️ DO NOT remove the /staging folder
-            # Delete only files and symlinks in the root of /var/www/html
-            sudo find "$PROD_WEB" -maxdepth 1 -type f -delete
-            sudo find "$PROD_WEB" -maxdepth 1 -type l -delete
-
-            # Copy new production build
+            sudo rm -rf "$PROD_WEB"/*
+            sudo mkdir -p "$PROD_WEB/static"
             sudo cp -r ~/app/build-artifacts/frontend/build-prod/* "$PROD_WEB"/
             sudo chown -R www-data:www-data "$PROD_WEB"
-
-            # Update prod jar
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/app.jar
             sudo systemctl restart prod
-
-            # Optional: quick nginx reload if configs changed
-            sudo nginx -t && sudo systemctl reload nginx || true
-
-            echo "✅ PRODUCTION DEPLOY done"
-            echo "✅ URL: https://banking.cyetechnology.com"
