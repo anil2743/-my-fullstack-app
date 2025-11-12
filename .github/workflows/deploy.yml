@@ -134,6 +134,8 @@ jobs:
             ls -la "$HOME/staging/backend"/*.jar 2>/dev/null || echo "No JAR files"
             echo "=== Contents of $HOME/staging/frontend/build (if exists) ==="
             ls -la "$HOME/staging/frontend/build" 2>/dev/null || echo "Build dir missing"
+            echo "=== Contents of $HOME/staging/frontend/build/build-artifacts (if exists) ==="
+            ls -la "$HOME/staging/frontend/build/build-artifacts" 2>/dev/null || echo "Build-artifacts dir missing"
             
             # Check directories exist
             if [ ! -d "$HOME/staging/frontend" ]; then
@@ -158,7 +160,7 @@ jobs:
             # Frontend deployment
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
-            sudo cp -r "$HOME/staging/frontend/build"/* "$STAGING_DIR"/
+            sudo cp -r "$HOME/staging/frontend/build/build-artifacts"/* "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Verify frontend files
@@ -302,6 +304,8 @@ jobs:
             ls -la "$HOME/app/backend"/*.jar 2>/dev/null || echo "No JAR files"
             echo "=== Contents of $HOME/app/frontend/build (if exists) ==="
             ls -la "$HOME/app/frontend/build" 2>/dev/null || echo "Build dir missing"
+            echo "=== Contents of $HOME/app/frontend/build/build-artifacts (if exists) ==="
+            ls -la "$HOME/app/frontend/build/build-artifacts" 2>/dev/null || echo "Build-artifacts dir missing"
             
             # Check directories exist
             if [ ! -d "$HOME/app/frontend" ]; then
@@ -334,7 +338,7 @@ jobs:
               sudo mv /tmp/staging-backup "$NGINX_ROOT/staging"
             fi
             
-            sudo cp -r "$HOME/app/frontend/build"/* "$NGINX_ROOT"/
+            sudo cp -r "$HOME/app/frontend/build/build-artifacts"/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
             # Verify frontend files
