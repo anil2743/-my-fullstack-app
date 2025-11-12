@@ -79,7 +79,7 @@ jobs:
           echo "=== Listing backend JAR ==="
           ls -la ./staging-backend.jar
           echo "=== Listing frontend artifact ==="
-          ls -laR ./build-artifacts/frontend
+          ls -la build-artifacts/frontend/build
 
       - name: Clean staging dir on EC2
         uses: appleboy/ssh-action@v0.1.7
@@ -89,16 +89,16 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             rm -rf ~/staging/*
-            mkdir -p ~/staging/backend
+            mkdir -p ~/staging/backend ~/staging/frontend/build
 
-      - name: Copy frontend to EC2 (staging)
+      - name: Copy frontend build files to EC2 (staging)
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "build-artifacts/frontend"
-          target: "/home/${{ secrets.EC2_USER }}/staging"
+          source: "build-artifacts/frontend/build/*"
+          target: "/home/${{ secrets.EC2_USER }}/staging/frontend/build/"
 
       - name: Copy backend JAR to EC2 (staging)
         uses: appleboy/scp-action@v0.1.7
@@ -132,6 +132,8 @@ jobs:
             ls -la "$HOME/staging/backend" 2>/dev/null || echo "Backend dir missing"
             echo "=== JAR files in backend ==="
             ls -la "$HOME/staging/backend"/*.jar 2>/dev/null || echo "No JAR files"
+            echo "=== Contents of $HOME/staging/frontend/build (if exists) ==="
+            ls -la "$HOME/staging/frontend/build" 2>/dev/null || echo "Build dir missing"
             
             # Check directories exist
             if [ ! -d "$HOME/staging/frontend" ]; then
@@ -246,7 +248,7 @@ jobs:
           echo "=== Listing backend JAR ==="
           ls -la ./prod-backend.jar
           echo "=== Listing frontend artifact ==="
-          ls -laR ./build-artifacts/frontend
+          ls -la build-artifacts/frontend/build
 
       - name: Clean app dir on EC2
         uses: appleboy/ssh-action@v0.1.7
@@ -256,16 +258,16 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             rm -rf ~/app/*
-            mkdir -p ~/app/backend
+            mkdir -p ~/app/backend ~/app/frontend/build
 
-      - name: Copy frontend to EC2 (prod)
+      - name: Copy frontend build files to EC2 (prod)
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "build-artifacts/frontend"
-          target: "/home/${{ secrets.EC2_USER }}/app"
+          source: "build-artifacts/frontend/build/*"
+          target: "/home/${{ secrets.EC2_USER }}/app/frontend/build/"
 
       - name: Copy backend JAR to EC2 (prod)
         uses: appleboy/scp-action@v0.1.7
@@ -298,6 +300,8 @@ jobs:
             ls -la "$HOME/app/backend" 2>/dev/null || echo "Backend dir missing"
             echo "=== JAR files in backend ==="
             ls -la "$HOME/app/backend"/*.jar 2>/dev/null || echo "No JAR files"
+            echo "=== Contents of $HOME/app/frontend/build (if exists) ==="
+            ls -la "$HOME/app/frontend/build" 2>/dev/null || echo "Build dir missing"
             
             # Check directories exist
             if [ ! -d "$HOME/app/frontend" ]; then
