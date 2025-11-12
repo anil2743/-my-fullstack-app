@@ -76,11 +76,13 @@ jobs:
           ls -la ./build-artifacts/frontend/build
 
       - name: Copy to EC2 (staging)
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          rsync -avz -e "ssh -o StrictHostKeyChecking=no" build-artifacts/ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/staging/
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "build-artifacts/frontend,build-artifacts/backend"
+          target: "/home/${{ secrets.EC2_USER }}/staging/"
 
       - name: Deploy on EC2 (staging)
         uses: appleboy/ssh-action@v0.1.7
@@ -96,72 +98,56 @@ jobs:
             JAR_FILE="app-staging.jar"
             echo "== Staging deploy start =="
             
-            # Check if build-artifacts directory exists
-            if [ ! -d "~/staging/build-artifacts" ]; then
-                echo "ERROR: build-artifacts directory not found"
-                echo "Contents of ~/staging:"
+            # Check directories exist
+            if [ ! -d "~/staging/frontend" ]; then
+                echo "ERROR: frontend directory not found"
                 ls -la ~/staging
-                echo "Looking for any build-artifacts directories:"
-                find ~/staging -name "*build*" -type d 2>/dev/null
                 exit 1
             fi
             
-            # Check for frontend and backend in build-artifacts
-            if [ ! -d "~/staging/build-artifacts/frontend" ]; then
-                echo "ERROR: frontend directory not found in build-artifacts"
-                echo "Contents of build-artifacts:"
-                ls -la ~/staging/build-artifacts
-                exit 1
-            fi
-            
-            if [ ! -d "~/staging/build-artifacts/backend" ]; then
-                echo "ERROR: backend directory not found in build-artifacts"
-                echo "Contents of build-artifacts:"
-                ls -la ~/staging/build-artifacts
+            if [ ! -d "~/staging/backend" ]; then
+                echo "ERROR: backend directory not found"
+                ls -la ~/staging
                 exit 1
             fi
             
             # Check if frontend build exists
-            if [ ! -d "~/staging/build-artifacts/frontend/build" ]; then
+            if [ ! -d "~/staging/frontend/build" ]; then
                 echo "ERROR: frontend build directory not found"
-                echo "Contents of build-artifacts/frontend:"
-                ls -la ~/staging/build-artifacts/frontend
+                ls -la ~/staging/frontend
                 exit 1
             fi
             
             # Frontend deployment
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
-            sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_DIR"/
+            sudo cp -r ~/staging/frontend/build/* "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Verify frontend files
             if [ ! -f "$STAGING_DIR/index.html" ]; then
                 echo "ERROR: index.html not found in $STAGING_DIR"
-                echo "Contents of $STAGING_DIR:"
                 ls -la "$STAGING_DIR"
                 exit 1
             fi
             
             # Backend deployment
-            if [ -f "~/staging/build-artifacts/backend/target/*.jar" ]; then
-                cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
+            if [ -f "~/staging/backend/target/*.jar" ]; then
+                cp ~/staging/backend/target/*.jar ~/staging/$JAR_FILE
             else
-                echo "ERROR: JAR file not found in backend directory"
-                echo "Contents of build-artifacts/backend:"
-                ls -la ~/staging/build-artifacts/backend
+                echo "ERROR: JAR file not found"
+                ls -la ~/staging/backend
                 exit 1
             fi
             
             # Check if systemd service exists
             if [ ! -f "/etc/systemd/system/${STAGING_SERVICE}" ]; then
                 echo "ERROR: Systemd service ${STAGING_SERVICE} not found"
-                echo "Available services:"
                 ls -la /etc/systemd/system/
                 exit 1
             fi
             
-            # Test Nginx configuration (using your existing config)
+            # Test Nginx configuration
             sudo nginx -t
             if [ $? -ne 0 ]; then
                 echo "ERROR: Nginx configuration test failed"
@@ -174,16 +160,6 @@ jobs:
             
             # Check service status
             sudo systemctl status ${STAGING_SERVICE} --no-pager -n 20
-            
-            # Check logs
-            echo "Checking Nginx error logs:"
-            sudo tail -n 20 /var/log/nginx/error.log
-            
-            echo "Checking Spring Boot logs:"
-            sudo journalctl -u ${STAGING_SERVICE} --no-pager -n 50
-            
-            # Clean up temporary files
-            rm -rf ~/staging/build-artifacts
             
             echo "== Staging deploy done =="
             echo "Staging URLs:"
@@ -227,11 +203,13 @@ jobs:
         run: ls -laR ./build-artifacts
 
       - name: Copy to EC2 (prod)
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          rsync -avz -e "ssh -o StrictHostKeyChecking=no" build-artifacts/ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/app/
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "build-artifacts/frontend,build-artifacts/backend"
+          target: "/home/${{ secrets.EC2_USER }}/app/"
 
       - name: Deploy on EC2 (prod)
         uses: appleboy/ssh-action@v0.1.7
@@ -246,82 +224,64 @@ jobs:
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
             
-            # Check if build-artifacts directory exists
-            if [ ! -d "~/app/build-artifacts" ]; then
-                echo "ERROR: build-artifacts directory not found"
-                echo "Contents of ~/app:"
+            # Check directories exist
+            if [ ! -d "~/app/frontend" ]; then
+                echo "ERROR: frontend directory not found"
                 ls -la ~/app
-                echo "Looking for any build-artifacts directories:"
-                find ~/app -name "*build*" -type d 2>/dev/null
                 exit 1
             fi
             
-            # Check for frontend and backend in build-artifacts
-            if [ ! -d "~/app/build-artifacts/frontend" ]; then
-                echo "ERROR: frontend directory not found in build-artifacts"
-                echo "Contents of build-artifacts:"
-                ls -la ~/app/build-artifacts
-                exit 1
-            fi
-            
-            if [ ! -d "~/app/build-artifacts/backend" ]; then
-                echo "ERROR: backend directory not found in build-artifacts"
-                echo "Contents of build-artifacts:"
-                ls -la ~/app/build-artifacts
+            if [ ! -d "~/app/backend" ]; then
+                echo "ERROR: backend directory not found"
+                ls -la ~/app
                 exit 1
             fi
             
             # Check if frontend build exists
-            if [ ! -d "~/app/build-artifacts/frontend/build" ]; then
+            if [ ! -d "~/app/frontend/build" ]; then
                 echo "ERROR: frontend build directory not found"
-                echo "Contents of build-artifacts/frontend:"
-                ls -la ~/app/build-artifacts/frontend
+                ls -la ~/app/frontend
                 exit 1
             fi
             
-            # Frontend deployment - IMPORTANT: Preserve staging directory
+            # Frontend deployment - preserve staging
             if [ -d "$NGINX_ROOT/staging" ]; then
-              echo "Backing up staging directory"
               sudo cp -r "$NGINX_ROOT/staging" /tmp/staging-backup
             fi
             
             sudo rm -rf "$NGINX_ROOT"/*
             
             if [ -d /tmp/staging-backup ]; then
-              echo "Restoring staging directory"
               sudo mv /tmp/staging-backup "$NGINX_ROOT/staging"
             fi
             
-            sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
+            sudo cp -r ~/app/frontend/build/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
             # Verify frontend files
             if [ ! -f "$NGINX_ROOT/index.html" ]; then
-                echo "ERROR: index.html not found in $NGINX_ROOT"
-                echo "Contents of $NGINX_ROOT:"
+                echo "ERROR: index.html not found"
                 ls -la "$NGINX_ROOT"
                 exit 1
             fi
             
             # Backend deployment
-            if [ -f "~/app/build-artifacts/backend/target/*.jar" ]; then
-                cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
+            if [ -f "~/app/backend/target/*.jar" ]; then
+                cp ~/app/backend/target/*.jar ~/app/$JAR_FILE
             else
-                echo "ERROR: JAR file not found in backend directory"
-                echo "Contents of build-artifacts/backend:"
-                ls -la ~/app/build-artifacts/backend
+                echo "ERROR: JAR file not found"
+                ls -la ~/app/backend
                 exit 1
             fi
             
             # Check if systemd service exists
             if [ ! -f "/etc/systemd/system/${PROD_SERVICE}" ]; then
                 echo "ERROR: Systemd service ${PROD_SERVICE} not found"
-                echo "Available services:"
                 ls -la /etc/systemd/system/
                 exit 1
             fi
             
-            # Test Nginx configuration (using your existing config)
+            # Test Nginx configuration
             sudo nginx -t
             if [ $? -ne 0 ]; then
                 echo "ERROR: Nginx configuration test failed"
@@ -331,9 +291,6 @@ jobs:
             sudo systemctl restart nginx
             sudo systemctl restart ${PROD_SERVICE}
             sudo systemctl status ${PROD_SERVICE} --no-pager -n 20
-            
-            # Clean up temporary files
-            rm -rf ~/app/build-artifacts
             
             echo "== Production deploy done =="
             echo "Production URLs:"
