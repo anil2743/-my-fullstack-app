@@ -75,7 +75,7 @@ jobs:
           echo "=== Frontend build contents ==="
           ls -la ./build-artifacts/frontend/build
           echo "=== Backend contents ==="
-          ls -la ./build-artifacts/backend || echo "Backend dir not found or empty"
+          ls -la ./build-artifacts/backend
 
       - name: Copy to EC2 (staging)
         uses: appleboy/scp-action@v0.1.7
@@ -85,6 +85,22 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           source: "build-artifacts/frontend,build-artifacts/backend"
           target: "/home/${{ secrets.EC2_USER }}/staging/"
+
+      - name: Debug staging dir after copy
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "=== Contents of ~/staging after SCP ==="
+            ls -la ~/staging
+            echo "=== Contents of ~/staging/frontend if exists ==="
+            ls -la ~/staging/frontend 2>/dev/null || echo "No frontend dir"
+            echo "=== Contents of ~/staging/backend if exists ==="
+            ls -la ~/staging/backend 2>/dev/null || echo "No backend dir"
+            echo "=== Contents of ~/staging/backend/*.jar if exists ==="
+            ls -la ~/staging/backend/*.jar 2>/dev/null || echo "No JAR in backend"
 
       - name: Deploy on EC2 (staging)
         uses: appleboy/ssh-action@v0.1.7
@@ -100,8 +116,12 @@ jobs:
             JAR_FILE="app-staging.jar"
             echo "== Staging deploy start =="
             
+            # Clean old artifacts
+            rm -f "$HOME/staging"/*.jar
+            rm -rf "$HOME/staging/build-artifacts"
+            
             # List staging contents for debug
-            echo "=== Contents of $HOME/staging ==="
+            echo "=== Contents of $HOME/staging before checks ==="
             ls -la "$HOME/staging"
             echo "=== Contents of $HOME/staging/frontend (if exists) ==="
             ls -la "$HOME/staging/frontend" 2>/dev/null || echo "Frontend dir missing"
@@ -216,7 +236,7 @@ jobs:
           echo "=== Frontend build contents ==="
           ls -la ./build-artifacts/frontend/build
           echo "=== Backend contents ==="
-          ls -la ./build-artifacts/backend || echo "Backend dir not found or empty"
+          ls -la ./build-artifacts/backend
 
       - name: Copy to EC2 (prod)
         uses: appleboy/scp-action@v0.1.7
@@ -226,6 +246,22 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           source: "build-artifacts/frontend,build-artifacts/backend"
           target: "/home/${{ secrets.EC2_USER }}/app/"
+
+      - name: Debug app dir after copy
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "=== Contents of ~/app after SCP ==="
+            ls -la ~/app
+            echo "=== Contents of ~/app/frontend if exists ==="
+            ls -la ~/app/frontend 2>/dev/null || echo "No frontend dir"
+            echo "=== Contents of ~/app/backend if exists ==="
+            ls -la ~/app/backend 2>/dev/null || echo "No backend dir"
+            echo "=== Contents of ~/app/backend/*.jar if exists ==="
+            ls -la ~/app/backend/*.jar 2>/dev/null || echo "No JAR in backend"
 
       - name: Deploy on EC2 (prod)
         uses: appleboy/ssh-action@v0.1.7
@@ -240,8 +276,12 @@ jobs:
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
             
+            # Clean old artifacts
+            rm -f "$HOME/app"/*.jar
+            rm -rf "$HOME/app/build-artifacts"
+            
             # List app contents for debug
-            echo "=== Contents of $HOME/app ==="
+            echo "=== Contents of $HOME/app before checks ==="
             ls -la "$HOME/app"
             echo "=== Contents of $HOME/app/frontend (if exists) ==="
             ls -la "$HOME/app/frontend" 2>/dev/null || echo "Frontend dir missing"
