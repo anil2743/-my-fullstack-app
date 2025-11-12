@@ -76,13 +76,14 @@ jobs:
           ls -la ./build-artifacts/frontend/build
 
       - name: Copy to EC2 (staging)
-        uses: easingthemes/ssh-deploy@v4.1.8
+        uses: appleboy/scp-action@v0.1.7
         with:
-          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
-          REMOTE_HOST: ${{ secrets.EC2_HOST }}
-          REMOTE_USER: ${{ secrets.EC2_USER }}
-          TARGET: "/home/${{ secrets.EC2_USER }}/staging/build-artifacts"
-          SOURCE: "build-artifacts/"
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "build-artifacts/*"
+          target: "/home/${{ secrets.EC2_USER }}/staging/build-artifacts/"
+          rm: true
 
       - name: Deploy on EC2 (staging)
         uses: appleboy/ssh-action@v0.1.7
@@ -103,6 +104,8 @@ jobs:
                 echo "ERROR: build-artifacts directory not found in ~/staging/"
                 echo "Contents of ~/staging:"
                 ls -la ~/staging
+                echo "Looking for build-artifacts in the system:"
+                find /home -name "build-artifacts" -type d 2>/dev/null
                 exit 1
             fi
             
@@ -277,13 +280,14 @@ jobs:
         run: ls -laR ./build-artifacts
 
       - name: Copy to EC2 (prod)
-        uses: easingthemes/ssh-deploy@v4.1.8
+        uses: appleboy/scp-action@v0.1.7
         with:
-          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
-          REMOTE_HOST: ${{ secrets.EC2_HOST }}
-          REMOTE_USER: ${{ secrets.EC2_USER }}
-          TARGET: "/home/${{ secrets.EC2_USER }}/app/build-artifacts"
-          SOURCE: "build-artifacts/"
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "build-artifacts/*"
+          target: "/home/${{ secrets.EC2_USER }}/app/build-artifacts/"
+          rm: true
 
       - name: Deploy on EC2 (prod)
         uses: appleboy/ssh-action@v0.1.7
@@ -303,6 +307,8 @@ jobs:
                 echo "ERROR: build-artifacts directory not found in ~/app/"
                 echo "Contents of ~/app:"
                 ls -la ~/app
+                echo "Looking for build-artifacts in the system:"
+                find /home -name "build-artifacts" -type d 2>/dev/null
                 exit 1
             fi
             
