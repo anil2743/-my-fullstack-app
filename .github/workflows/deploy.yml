@@ -55,7 +55,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: backend-jar
-          path: ./build-artifacts/backend/target
+          path: ./build-artifacts/backend
 
       - name: Build Frontend (Staging)
         run: |
@@ -74,8 +74,8 @@ jobs:
           ls -laR ./build-artifacts
           echo "=== Frontend build contents ==="
           ls -la ./build-artifacts/frontend/build
-          echo "=== Backend target contents ==="
-          ls -la ./build-artifacts/backend/target || echo "Backend target dir not found or empty"
+          echo "=== Backend contents ==="
+          ls -la ./build-artifacts/backend || echo "Backend dir not found or empty"
 
       - name: Copy to EC2 (staging)
         uses: appleboy/scp-action@v0.1.7
@@ -142,8 +142,8 @@ jobs:
             fi
             
             # Backend deployment
-            if [ -f "$HOME/staging/backend/target"/*.jar ]; then
-                cp "$HOME/staging/backend/target"/*.jar "$HOME/staging/$JAR_FILE"
+            if [ -f "$HOME/staging/backend"/*.jar ]; then
+                cp "$HOME/staging/backend"/*.jar "$HOME/staging/$JAR_FILE"
             else
                 echo "ERROR: JAR file not found"
                 ls -la "$HOME/staging/backend"
@@ -196,7 +196,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: backend-jar
-          path: ./build-artifacts/backend/target
+          path: ./build-artifacts/backend
 
       - name: Build Frontend (Production)
         run: |
@@ -215,8 +215,8 @@ jobs:
           ls -laR ./build-artifacts
           echo "=== Frontend build contents ==="
           ls -la ./build-artifacts/frontend/build
-          echo "=== Backend target contents ==="
-          ls -la ./build-artifacts/backend/target || echo "Backend target dir not found or empty"
+          echo "=== Backend contents ==="
+          ls -la ./build-artifacts/backend || echo "Backend dir not found or empty"
 
       - name: Copy to EC2 (prod)
         uses: appleboy/scp-action@v0.1.7
@@ -290,8 +290,8 @@ jobs:
             fi
             
             # Backend deployment
-            if [ -f "$HOME/app/backend/target"/*.jar ]; then
-                cp "$HOME/app/backend/target"/*.jar "$HOME/app/$JAR_FILE"
+            if [ -f "$HOME/app/backend"/*.jar ]; then
+                cp "$HOME/app/backend"/*.jar "$HOME/app/$JAR_FILE"
             else
                 echo "ERROR: JAR file not found"
                 ls -la "$HOME/app/backend"
