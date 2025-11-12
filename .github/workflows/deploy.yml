@@ -55,7 +55,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: backend-jar
-          path: .
+          path: ./backend-jar
 
       - name: Build Frontend (Staging)
         run: |
@@ -71,7 +71,7 @@ jobs:
       - name: List artifacts
         run: |
           echo "=== Listing backend artifact ==="
-          ls -la backend-jar/
+          ls -la ./backend-jar/
           echo "=== Listing build artifacts ==="
           ls -laR ./build-artifacts
           echo "=== Frontend build contents ==="
@@ -217,7 +217,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: backend-jar
-          path: .
+          path: ./backend-jar
 
       - name: Build Frontend (Production)
         run: |
@@ -233,7 +233,7 @@ jobs:
       - name: List artifacts
         run: |
           echo "=== Listing backend artifact ==="
-          ls -la backend-jar/
+          ls -la ./backend-jar/
           echo "=== Listing build artifacts ==="
           ls -laR ./build-artifacts
           echo "=== Frontend build contents ==="
