@@ -1,8 +1,8 @@
 import axios from "axios";
 
 const base = window.location.href.includes("/staging")
-    ? "http://65.1.231.237/staging/api"                  // STAGING
-    : "https://banking.cyetechnology.com/api";          // PRODUCTION
+    ? "http://65.1.231.237/staging/api"                  
+    : "https://banking.cyetechnology.com/api";         
 
 const api = axios.create({
     baseURL: base,
