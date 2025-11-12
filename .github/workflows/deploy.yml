@@ -55,7 +55,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: backend-jar
-          path: ./build-artifacts/backend
+          path: .
 
       - name: Build Frontend (Staging)
         run: |
@@ -70,12 +70,21 @@ jobs:
 
       - name: List artifacts
         run: |
+          echo "=== Listing backend artifact ==="
+          ls -la backend-jar/
           echo "=== Listing build artifacts ==="
           ls -laR ./build-artifacts
           echo "=== Frontend build contents ==="
           ls -la ./build-artifacts/frontend/build
-          echo "=== Backend contents ==="
-          ls -la ./build-artifacts/backend
+
+      - name: Clean staging dir on EC2
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            rm -rf ~/staging/*
 
       - name: Copy frontend to EC2 (staging)
         uses: appleboy/scp-action@v0.1.7
@@ -92,7 +101,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "build-artifacts/backend/*.jar"
+          source: "backend-jar/*.jar"
           target: "/home/${{ secrets.EC2_USER }}/staging/backend/"
 
       - name: Deploy on EC2 (staging)
@@ -116,6 +125,8 @@ jobs:
             ls -la "$HOME/staging/frontend" 2>/dev/null || echo "Frontend dir missing"
             echo "=== Contents of $HOME/staging/backend (if exists) ==="
             ls -la "$HOME/staging/backend" 2>/dev/null || echo "Backend dir missing"
+            echo "=== JAR files in backend ==="
+            ls -la "$HOME/staging/backend"/*.jar 2>/dev/null || echo "No JAR files"
             
             # Check directories exist
             if [ ! -d "$HOME/staging/frontend" ]; then
@@ -153,6 +164,7 @@ jobs:
             # Backend deployment
             if [ -f "$HOME/staging/backend"/*.jar ]; then
                 cp "$HOME/staging/backend"/*.jar "$HOME/staging/$JAR_FILE"
+                echo "JAR copied successfully to $JAR_FILE"
             else
                 echo "ERROR: JAR file not found"
                 ls -la "$HOME/staging/backend"
@@ -205,7 +217,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: backend-jar
-          path: ./build-artifacts/backend
+          path: .
 
       - name: Build Frontend (Production)
         run: |
@@ -220,12 +232,21 @@ jobs:
 
       - name: List artifacts
         run: |
+          echo "=== Listing backend artifact ==="
+          ls -la backend-jar/
           echo "=== Listing build artifacts ==="
           ls -laR ./build-artifacts
           echo "=== Frontend build contents ==="
           ls -la ./build-artifacts/frontend/build
-          echo "=== Backend contents ==="
-          ls -la ./build-artifacts/backend
+
+      - name: Clean app dir on EC2
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            rm -rf ~/app/*
 
       - name: Copy frontend to EC2 (prod)
         uses: appleboy/scp-action@v0.1.7
@@ -242,7 +263,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "build-artifacts/backend/*.jar"
+          source: "backend-jar/*.jar"
           target: "/home/${{ secrets.EC2_USER }}/app/backend/"
 
       - name: Deploy on EC2 (prod)
@@ -265,6 +286,8 @@ jobs:
             ls -la "$HOME/app/frontend" 2>/dev/null || echo "Frontend dir missing"
             echo "=== Contents of $HOME/app/backend (if exists) ==="
             ls -la "$HOME/app/backend" 2>/dev/null || echo "Backend dir missing"
+            echo "=== JAR files in backend ==="
+            ls -la "$HOME/app/backend"/*.jar 2>/dev/null || echo "No JAR files"
             
             # Check directories exist
             if [ ! -d "$HOME/app/frontend" ]; then
@@ -310,6 +333,7 @@ jobs:
             # Backend deployment
             if [ -f "$HOME/app/backend"/*.jar ]; then
                 cp "$HOME/app/backend"/*.jar "$HOME/app/$JAR_FILE"
+                echo "JAR copied successfully to $JAR_FILE"
             else
                 echo "ERROR: JAR file not found"
                 ls -la "$HOME/app/backend"
