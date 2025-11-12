@@ -94,61 +94,48 @@ jobs:
             set -e
             NGINX_ROOT="/var/www/html"
             STAGING_DIR="$NGINX_ROOT/staging"
-            SPRING_SERVICE="springboot-staging"
+            STAGING_SERVICE="staging.service"  # Your existing service name
             JAR_FILE="app-staging.jar"
             echo "== Staging deploy start =="
             
-            # Move files from build-artifacts to staging directory
-            if [ -d "~/staging/build-artifacts" ]; then
-                echo "Found build-artifacts directory, moving contents..."
-                # Move all contents to parent directory
-                mv ~/staging/build-artifacts/* ~/staging/
-                # Remove the now-empty build-artifacts directory
-                rmdir ~/staging/build-artifacts
-                echo "Contents after moving:"
-                ls -la ~/staging
-            fi
+            # Simple approach: use files directly from build-artifacts directory
+            BUILD_ARTIFACTS_DIR="~/staging/build-artifacts"
             
-            # Check if frontend directory exists
-            if [ ! -d "~/staging/frontend" ]; then
-                echo "ERROR: frontend directory not found in ~/staging/"
+            # Check if build-artifacts directory exists
+            if [ ! -d "$BUILD_ARTIFACTS_DIR" ]; then
+                echo "ERROR: build-artifacts directory not found"
                 echo "Contents of ~/staging:"
                 ls -la ~/staging
-                echo "Looking for frontend directory in subdirectories:"
-                find ~/staging -name "frontend" -type d 2>/dev/null
                 exit 1
             fi
             
-            # Check if backend directory exists
-            if [ ! -d "~/staging/backend" ]; then
-                echo "ERROR: backend directory not found in ~/staging/"
-                echo "Contents of ~/staging:"
-                ls -la ~/staging
-                echo "Looking for backend directory in subdirectories:"
-                find ~/staging -name "backend" -type d 2>/dev/null
+            # Check for frontend and backend in build-artifacts
+            if [ ! -d "$BUILD_ARTIFACTS_DIR/frontend" ]; then
+                echo "ERROR: frontend directory not found in build-artifacts"
+                echo "Contents of build-artifacts:"
+                ls -la "$BUILD_ARTIFACTS_DIR"
                 exit 1
             fi
             
-            # Debug: List the contents
-            echo "Contents of ~/staging:"
-            ls -la ~/staging
-            echo "Contents of ~/staging/frontend:"
-            ls -la ~/staging/frontend
-            echo "Contents of ~/staging/backend:"
-            ls -la ~/staging/backend
+            if [ ! -d "$BUILD_ARTIFACTS_DIR/backend" ]; then
+                echo "ERROR: backend directory not found in build-artifacts"
+                echo "Contents of build-artifacts:"
+                ls -la "$BUILD_ARTIFACTS_DIR"
+                exit 1
+            fi
             
             # Check if frontend build exists
-            if [ ! -d "~/staging/frontend/build" ]; then
+            if [ ! -d "$BUILD_ARTIFACTS_DIR/frontend/build" ]; then
                 echo "ERROR: frontend build directory not found"
-                echo "Contents of ~/staging/frontend:"
-                ls -la ~/staging/frontend
+                echo "Contents of build-artifacts/frontend:"
+                ls -la "$BUILD_ARTIFACTS_DIR/frontend"
                 exit 1
             fi
             
-            # Frontend
+            # Frontend deployment
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
-            sudo cp -r ~/staging/frontend/build/* "$STAGING_DIR"/
+            sudo cp -r "$BUILD_ARTIFACTS_DIR/frontend/build/*" "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Verify frontend files
@@ -159,81 +146,25 @@ jobs:
                 exit 1
             fi
             
-            # Backend
-            if [ -f "~/staging/backend/target/*.jar" ]; then
-                cp ~/staging/backend/target/*.jar ~/staging/$JAR_FILE
+            # Backend deployment
+            if [ -f "$BUILD_ARTIFACTS_DIR/backend/target/*.jar" ]; then
+                cp "$BUILD_ARTIFACTS_DIR/backend/target/*.jar" ~/staging/$JAR_FILE
             else
                 echo "ERROR: JAR file not found in backend directory"
-                echo "Contents of ~/staging/backend:"
-                ls -la ~/staging/backend
+                echo "Contents of build-artifacts/backend:"
+                ls -la "$BUILD_ARTIFACTS_DIR/backend"
                 exit 1
             fi
             
-            # Create systemd service if missing
-            if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
-              sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
-            [Unit]
-            Description=Spring Boot (staging)
-            After=network.target
-            [Service]
-            User=${{ secrets.EC2_USER }}
-            WorkingDirectory=/home/${{ secrets.EC2_USER }}/staging
-            ExecStart=/usr/bin/java -jar $JAR_FILE --server.port=8081
-            SuccessExitStatus=143
-            Restart=always
-            RestartSec=5
-            [Install]
-            WantedBy=multi-user.target
-            EOF
-              sudo systemctl daemon-reload
-              sudo systemctl enable ${SPRING_SERVICE}
+            # Check if systemd service exists
+            if [ ! -f "/etc/systemd/system/${STAGING_SERVICE}" ]; then
+                echo "ERROR: Systemd service ${STAGING_SERVICE} not found"
+                echo "Available services:"
+                ls -la /etc/systemd/system/
+                exit 1
             fi
             
-            # Configure Nginx for staging (FIXED)
-            sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
-            server {
-                listen 80 default_server;
-                server_name _;
-
-                # STAGING API
-                location ^~ /staging/api/ {
-                    proxy_pass http://127.0.0.1:8081;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                }
-
-                # EXACT MATCH /staging → redirect to /staging/
-                location = /staging {
-                    return 302 /staging/;
-                }
-
-                # Static assets handling
-                location ~* ^/staging/.*\.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
-                    root /var/www/html;
-                    expires 1y;
-                    add_header Cache-Control "public, immutable";
-                }
-
-                # STAGING FRONTEND (FIXED)
-                location ^~ /staging/ {
-                    root /var/www/html;
-                    try_files \$uri \$uri/ /staging/index.html;
-                }
-            }
-            EOF
-            
-            # Enable staging site
-            if [ ! -L "/etc/nginx/sites-enabled/staging" ]; then
-              sudo ln -s /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
-            fi
-            
-            # Remove default site if exists
-            if [ -L "/etc/nginx/sites-enabled/default" ]; then
-              sudo rm /etc/nginx/sites-enabled/default
-            fi
-            
-            # Test Nginx configuration
+            # Test Nginx configuration (using your existing config)
             sudo nginx -t
             if [ $? -ne 0 ]; then
                 echo "ERROR: Nginx configuration test failed"
@@ -242,21 +173,20 @@ jobs:
             
             # Restart services
             sudo systemctl restart nginx
-            sudo systemctl restart ${SPRING_SERVICE}
+            sudo systemctl restart ${STAGING_SERVICE}
             
             # Check service status
-            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
+            sudo systemctl status ${STAGING_SERVICE} --no-pager -n 20
             
             # Check logs
             echo "Checking Nginx error logs:"
             sudo tail -n 20 /var/log/nginx/error.log
             
             echo "Checking Spring Boot logs:"
-            sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
+            sudo journalctl -u ${STAGING_SERVICE} --no-pager -n 50
             
             # Clean up temporary files
-            rm -rf ~/staging/frontend
-            rm -rf ~/staging/backend
+            rm -rf "$BUILD_ARTIFACTS_DIR"
             
             echo "== Staging deploy done =="
             echo "Staging URLs:"
@@ -317,75 +247,58 @@ jobs:
           script: |
             set -e
             NGINX_ROOT="/var/www/html"
-            SPRING_SERVICE="springboot"
+            PROD_SERVICE="prod.service"  # Your existing service name
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
             
-            # Move files from build-artifacts to app directory
-            if [ -d "~/app/build-artifacts" ]; then
-                echo "Found build-artifacts directory, moving contents..."
-                # Move all contents to parent directory
-                mv ~/app/build-artifacts/* ~/app/
-                # Remove the now-empty build-artifacts directory
-                rmdir ~/app/build-artifacts
-                echo "Contents after moving:"
-                ls -la ~/app
-            fi
+            # Simple approach: use files directly from build-artifacts directory
+            BUILD_ARTIFACTS_DIR="~/app/build-artifacts"
             
-            # Check if frontend directory exists
-            if [ ! -d "~/app/frontend" ]; then
-                echo "ERROR: frontend directory not found in ~/app/"
+            # Check if build-artifacts directory exists
+            if [ ! -d "$BUILD_ARTIFACTS_DIR" ]; then
+                echo "ERROR: build-artifacts directory not found"
                 echo "Contents of ~/app:"
                 ls -la ~/app
-                echo "Looking for frontend directory in subdirectories:"
-                find ~/app -name "frontend" -type d 2>/dev/null
                 exit 1
             fi
             
-            # Check if backend directory exists
-            if [ ! -d "~/app/backend" ]; then
-                echo "ERROR: backend directory not found in ~/app/"
-                echo "Contents of ~/app:"
-                ls -la ~/app
-                echo "Looking for backend directory in subdirectories:"
-                find ~/app -name "backend" -type d 2>/dev/null
+            # Check for frontend and backend in build-artifacts
+            if [ ! -d "$BUILD_ARTIFACTS_DIR/frontend" ]; then
+                echo "ERROR: frontend directory not found in build-artifacts"
+                echo "Contents of build-artifacts:"
+                ls -la "$BUILD_ARTIFACTS_DIR"
                 exit 1
             fi
             
-            # Debug: List the contents
-            echo "Contents of ~/app:"
-            ls -la ~/app
-            echo "Contents of ~/app/frontend:"
-            ls -la ~/app/frontend
-            echo "Contents of ~/app/backend:"
-            ls -la ~/app/backend
+            if [ ! -d "$BUILD_ARTIFACTS_DIR/backend" ]; then
+                echo "ERROR: backend directory not found in build-artifacts"
+                echo "Contents of build-artifacts:"
+                ls -la "$BUILD_ARTIFACTS_DIR"
+                exit 1
+            fi
             
             # Check if frontend build exists
-            if [ ! -d "~/app/frontend/build" ]; then
+            if [ ! -d "$BUILD_ARTIFACTS_DIR/frontend/build" ]; then
                 echo "ERROR: frontend build directory not found"
-                echo "Contents of ~/app/frontend:"
-                ls -la ~/app/frontend
+                echo "Contents of build-artifacts/frontend:"
+                ls -la "$BUILD_ARTIFACTS_DIR/frontend"
                 exit 1
             fi
             
-            # Frontend - IMPORTANT: Preserve staging directory
-            # Create a temporary backup of staging directory
+            # Frontend deployment - IMPORTANT: Preserve staging directory
             if [ -d "$NGINX_ROOT/staging" ]; then
               echo "Backing up staging directory"
               sudo cp -r "$NGINX_ROOT/staging" /tmp/staging-backup
             fi
             
-            # Remove all files in NGINX_ROOT except staging directory
-            sudo find "$NGINX_ROOT" -mindepth 1 -maxdepth 1 ! -name staging -exec rm -rf {} +
+            sudo rm -rf "$NGINX_ROOT"/*
             
-            # Restore staging directory if it existed
             if [ -d /tmp/staging-backup ]; then
               echo "Restoring staging directory"
               sudo mv /tmp/staging-backup "$NGINX_ROOT/staging"
             fi
             
-            # Copy the production build
-            sudo cp -r ~/app/frontend/build/* "$NGINX_ROOT"/
+            sudo cp -r "$BUILD_ARTIFACTS_DIR/frontend/build/*" "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
             # Verify frontend files
@@ -396,90 +309,25 @@ jobs:
                 exit 1
             fi
             
-            # Backend
-            if [ -f "~/app/backend/target/*.jar" ]; then
-                cp ~/app/backend/target/*.jar ~/app/$JAR_FILE
+            # Backend deployment
+            if [ -f "$BUILD_ARTIFACTS_DIR/backend/target/*.jar" ]; then
+                cp "$BUILD_ARTIFACTS_DIR/backend/target/*.jar" ~/app/$JAR_FILE
             else
                 echo "ERROR: JAR file not found in backend directory"
-                echo "Contents of ~/app/backend:"
-                ls -la ~/app/backend
+                echo "Contents of build-artifacts/backend:"
+                ls -la "$BUILD_ARTIFACTS_DIR/backend"
                 exit 1
             fi
             
-            # Create systemd service if missing
-            if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
-              sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
-            [Unit]
-            Description=Spring Boot (prod)
-            After=network.target
-            [Service]
-            User=${{ secrets.EC2_USER }}
-            WorkingDirectory=/home/${{ secrets.EC2_USER }}/app
-            ExecStart=/usr/bin/java -jar $JAR_FILE --server.port=8080
-            SuccessExitStatus=143
-            Restart=always
-            RestartSec=5
-            [Install]
-            WantedBy=multi-user.target
-            EOF
-              sudo systemctl daemon-reload
-              sudo systemctl enable ${SPRING_SERVICE}
+            # Check if systemd service exists
+            if [ ! -f "/etc/systemd/system/${PROD_SERVICE}" ]; then
+                echo "ERROR: Systemd service ${PROD_SERVICE} not found"
+                echo "Available services:"
+                ls -la /etc/systemd/system/
+                exit 1
             fi
             
-            # Configure Nginx for production (UNIFIED CONFIG)
-            sudo tee /etc/nginx/sites-available/banking > /dev/null <<EOF
-            server {
-                server_name banking.cyetechnology.com;
-
-                # Static assets handling
-                location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
-                    root /var/www/html;
-                    expires 1y;
-                    add_header Cache-Control "public, immutable";
-                }
-
-                # Frontend app
-                location / {
-                    root /var/www/html;
-                    try_files \$uri \$uri/ /index.html;
-                }
-
-                # API
-                location ^~ /api/ {
-                    proxy_pass http://127.0.0.1:8080;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                }
-
-                listen 443 ssl; # managed by Certbot
-                ssl_certificate /etc/letsencrypt/live/banking.cyetechnology.com/fullchain.pem; # managed by Certbot
-                ssl_certificate_key /etc/letsencrypt/live/banking.cyetechnology.com/privkey.pem; # managed by Certbot
-                include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
-                ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
-            }
-            server {
-                if (\$host = banking.cyetechnology.com) {
-                    return 301 https://\$host\$request_uri;
-                } # managed by Certbot
-
-                listen 80;
-                server_name banking.cyetechnology.com;
-                return 404; # managed by Certbot
-            }
-            EOF
-            
-            # Enable production site
-            if [ ! -L "/etc/nginx/sites-enabled/banking" ]; then
-              sudo ln -s /etc/nginx/sites-available/banking /etc/nginx/sites-enabled/
-            fi
-            
-            # Remove default site if exists
-            if [ -L "/etc/nginx/sites-enabled/default" ]; then
-              sudo rm /etc/nginx/sites-enabled/default
-            fi
-            
-            # Test Nginx configuration
+            # Test Nginx configuration (using your existing config)
             sudo nginx -t
             if [ $? -ne 0 ]; then
                 echo "ERROR: Nginx configuration test failed"
@@ -487,12 +335,11 @@ jobs:
             fi
          
             sudo systemctl restart nginx
-            sudo systemctl restart ${SPRING_SERVICE}
-            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
+            sudo systemctl restart ${PROD_SERVICE}
+            sudo systemctl status ${PROD_SERVICE} --no-pager -n 20
             
             # Clean up temporary files
-            rm -rf ~/app/frontend
-            rm -rf ~/app/backend
+            rm -rf "$BUILD_ARTIFACTS_DIR"
             
             echo "== Production deploy done =="
             echo "Production URLs:"
