@@ -69,16 +69,20 @@ jobs:
           cp -r frontend/build build-artifacts/frontend/
 
       - name: List artifacts
-        run: ls -laR ./build-artifacts
+        run: |
+          echo "=== Listing build artifacts ==="
+          ls -laR ./build-artifacts
+          echo "=== Frontend build contents ==="
+          ls -la ./build-artifacts/frontend/build
 
       - name: Copy to EC2 (staging)
-        uses: appleboy/scp-action@v0.1.7
+        uses: easingthemes/ssh-deploy@v4.1.8
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: "build-artifacts"
-          target: "/home/${{ secrets.EC2_USER }}/staging/"
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+          REMOTE_HOST: ${{ secrets.EC2_HOST }}
+          REMOTE_USER: ${{ secrets.EC2_USER }}
+          TARGET: "/home/${{ secrets.EC2_USER }}/staging/"
+          SOURCE: "build-artifacts/"
 
       - name: Deploy on EC2 (staging)
         uses: appleboy/ssh-action@v0.1.7
@@ -94,9 +98,13 @@ jobs:
             JAR_FILE="app-staging.jar"
             echo "== Staging deploy start =="
             
-            # Clean up any existing deployment artifacts
-            rm -rf ~/staging/build-artifacts
-            rm -f ~/staging/$JAR_FILE
+            # Check if build-artifacts directory exists
+            if [ ! -d "~/staging/build-artifacts" ]; then
+                echo "ERROR: build-artifacts directory not found in ~/staging/"
+                echo "Contents of ~/staging:"
+                ls -la ~/staging
+                exit 1
+            fi
             
             # Debug: List the contents of the staging directory
             echo "Contents of ~/staging:"
@@ -105,6 +113,14 @@ jobs:
             ls -la ~/staging/build-artifacts
             echo "Contents of ~/staging/build-artifacts/frontend:"
             ls -la ~/staging/build-artifacts/frontend
+            
+            # Check if frontend build exists
+            if [ ! -d "~/staging/build-artifacts/frontend/build" ]; then
+                echo "ERROR: frontend build directory not found"
+                echo "Contents of ~/staging/build-artifacts/frontend:"
+                ls -la ~/staging/build-artifacts/frontend
+                exit 1
+            fi
             
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
@@ -115,12 +131,21 @@ jobs:
             # Verify frontend files
             if [ ! -f "$STAGING_DIR/index.html" ]; then
                 echo "ERROR: index.html not found in $STAGING_DIR"
+                echo "Contents of $STAGING_DIR:"
+                ls -la "$STAGING_DIR"
                 exit 1
             fi
             
             # Backend
             mkdir -p ~/staging/backend
-            cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
+            if [ -f "~/staging/build-artifacts/backend/target/*.jar" ]; then
+                cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
+            else
+                echo "ERROR: JAR file not found in build-artifacts"
+                echo "Contents of ~/staging/build-artifacts/backend:"
+                ls -la ~/staging/build-artifacts/backend
+                exit 1
+            fi
             
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
@@ -252,13 +277,13 @@ jobs:
         run: ls -laR ./build-artifacts
 
       - name: Copy to EC2 (prod)
-        uses: appleboy/scp-action@v0.1.7
+        uses: easingthemes/ssh-deploy@v4.1.8
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: "build-artifacts"
-          target: "/home/${{ secrets.EC2_USER }}/app/"
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+          REMOTE_HOST: ${{ secrets.EC2_HOST }}
+          REMOTE_USER: ${{ secrets.EC2_USER }}
+          TARGET: "/home/${{ secrets.EC2_USER }}/app/"
+          SOURCE: "build-artifacts/"
 
       - name: Deploy on EC2 (prod)
         uses: appleboy/ssh-action@v0.1.7
@@ -273,9 +298,13 @@ jobs:
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
             
-            # Clean up any existing deployment artifacts
-            rm -rf ~/app/build-artifacts
-            rm -f ~/app/$JAR_FILE
+            # Check if build-artifacts directory exists
+            if [ ! -d "~/app/build-artifacts" ]; then
+                echo "ERROR: build-artifacts directory not found in ~/app/"
+                echo "Contents of ~/app:"
+                ls -la ~/app
+                exit 1
+            fi
             
             # Debug: List the contents of the app directory
             echo "Contents of ~/app:"
@@ -284,6 +313,14 @@ jobs:
             ls -la ~/app/build-artifacts
             echo "Contents of ~/app/build-artifacts/frontend:"
             ls -la ~/app/build-artifacts/frontend
+            
+            # Check if frontend build exists
+            if [ ! -d "~/app/build-artifacts/frontend/build" ]; then
+                echo "ERROR: frontend build directory not found"
+                echo "Contents of ~/app/build-artifacts/frontend:"
+                ls -la ~/app/build-artifacts/frontend
+                exit 1
+            fi
             
             # Frontend - IMPORTANT: Preserve staging directory
             # Create a temporary backup of staging directory
@@ -308,6 +345,8 @@ jobs:
             # Verify frontend files
             if [ ! -f "$NGINX_ROOT/index.html" ]; then
                 echo "ERROR: index.html not found in $NGINX_ROOT"
+                echo "Contents of $NGINX_ROOT:"
+                ls -la "$NGINX_ROOT"
                 exit 1
             fi
             
