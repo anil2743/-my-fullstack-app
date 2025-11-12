@@ -94,6 +94,10 @@ jobs:
             JAR_FILE="app-staging.jar"
             echo "== Staging deploy start =="
             
+            # Clean up any existing deployment artifacts
+            rm -rf ~/staging/build-artifacts
+            rm -f ~/staging/$JAR_FILE
+            
             # Debug: List the contents of the staging directory
             echo "Contents of ~/staging:"
             ls -la ~/staging
@@ -157,16 +161,17 @@ jobs:
                     return 302 /staging/;
                 }
 
+                # Static assets handling
+                location ~* ^/staging/.*\.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+                    root /var/www/html;
+                    expires 1y;
+                    add_header Cache-Control "public, immutable";
+                }
+
                 # STAGING FRONTEND (FIXED)
                 location ^~ /staging/ {
                     root /var/www/html;
                     try_files \$uri \$uri/ /staging/index.html;
-                    
-                    # Static file handling
-                    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
-                        expires 1y;
-                        add_header Cache-Control "public, immutable";
-                    }
                 }
             }
             EOF
@@ -174,6 +179,11 @@ jobs:
             # Enable staging site
             if [ ! -L "/etc/nginx/sites-enabled/staging" ]; then
               sudo ln -s /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
+            fi
+            
+            # Remove default site if exists
+            if [ -L "/etc/nginx/sites-enabled/default" ]; then
+              sudo rm /etc/nginx/sites-enabled/default
             fi
             
             # Test Nginx configuration
@@ -196,6 +206,9 @@ jobs:
             
             echo "Checking Spring Boot logs:"
             sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
+            
+            # Clean up temporary files
+            rm -rf ~/staging/build-artifacts
             
             echo "== Staging deploy done =="
             echo "Staging URLs:"
@@ -260,6 +273,10 @@ jobs:
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
             
+            # Clean up any existing deployment artifacts
+            rm -rf ~/app/build-artifacts
+            rm -f ~/app/$JAR_FILE
+            
             # Debug: List the contents of the app directory
             echo "Contents of ~/app:"
             ls -la ~/app
@@ -288,6 +305,12 @@ jobs:
             sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
+            # Verify frontend files
+            if [ ! -f "$NGINX_ROOT/index.html" ]; then
+                echo "ERROR: index.html not found in $NGINX_ROOT"
+                exit 1
+            fi
+            
             # Backend
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
             
@@ -311,18 +334,30 @@ jobs:
               sudo systemctl enable ${SPRING_SERVICE}
             fi
             
-            # Configure Nginx for production
+            # Configure Nginx for production (UNIFIED CONFIG)
             sudo tee /etc/nginx/sites-available/banking > /dev/null <<EOF
             server {
                 server_name banking.cyetechnology.com;
 
+                # Static assets handling
+                location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+                    root /var/www/html;
+                    expires 1y;
+                    add_header Cache-Control "public, immutable";
+                }
+
+                # Frontend app
                 location / {
                     root /var/www/html;
                     try_files \$uri \$uri/ /index.html;
                 }
 
+                # API
                 location ^~ /api/ {
                     proxy_pass http://127.0.0.1:8080;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
                 }
 
                 listen 443 ssl; # managed by Certbot
@@ -362,6 +397,9 @@ jobs:
             sudo systemctl restart nginx
             sudo systemctl restart ${SPRING_SERVICE}
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
+            
+            # Clean up temporary files
+            rm -rf ~/app/build-artifacts
             
             echo "== Production deploy done =="
             echo "Production URLs:"
