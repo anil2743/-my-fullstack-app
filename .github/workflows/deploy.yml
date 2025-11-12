@@ -31,6 +31,7 @@ jobs:
           name: backend-jar
           path: |
             backend/target/*.jar
+
   deploy-staging:
     name: Deploy to STAGING EC2
     needs: build
@@ -92,6 +93,7 @@ jobs:
             SPRING_SERVICE="springboot-staging"
             JAR_FILE="app-staging.jar"
             echo "== Staging deploy start =="
+            
             # Debug: List the contents of the staging directory
             echo "Contents of ~/staging:"
             ls -la ~/staging
@@ -99,15 +101,23 @@ jobs:
             ls -la ~/staging/build-artifacts
             echo "Contents of ~/staging/build-artifacts/frontend:"
             ls -la ~/staging/build-artifacts/frontend
+            
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
             sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
+            # Verify frontend files
+            if [ ! -f "$STAGING_DIR/index.html" ]; then
+                echo "ERROR: index.html not found in $STAGING_DIR"
+                exit 1
+            fi
+            
             # Backend
             mkdir -p ~/staging/backend
             cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
+            
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
               sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
@@ -127,15 +137,14 @@ jobs:
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
             fi
-            # Configure Nginx for staging
+            
+            # Configure Nginx for staging (FIXED)
             sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
             server {
                 listen 80 default_server;
                 server_name _;
 
-                # ============================
                 # STAGING API
-                # ============================
                 location ^~ /staging/api/ {
                     proxy_pass http://127.0.0.1:8081;
                     proxy_set_header Host \$host;
@@ -143,19 +152,21 @@ jobs:
                     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
                 }
 
-                # ============================
-                # FIX: EXACT MATCH /staging → redirect to /staging/
-                # ============================
+                # EXACT MATCH /staging → redirect to /staging/
                 location = /staging {
                     return 302 /staging/;
                 }
 
-                # ============================
-                # STAGING FRONTEND
-                # ============================
+                # STAGING FRONTEND (FIXED)
                 location ^~ /staging/ {
-                    alias /var/www/html/staging/;
+                    root /var/www/html;
                     try_files \$uri \$uri/ /staging/index.html;
+                    
+                    # Static file handling
+                    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+                        expires 1y;
+                        add_header Cache-Control "public, immutable";
+                    }
                 }
             }
             EOF
@@ -165,13 +176,32 @@ jobs:
               sudo ln -s /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
             fi
             
+            # Test Nginx configuration
+            sudo nginx -t
+            if [ $? -ne 0 ]; then
+                echo "ERROR: Nginx configuration test failed"
+                exit 1
+            fi
+            
+            # Restart services
             sudo systemctl restart nginx
             sudo systemctl restart ${SPRING_SERVICE}
+            
+            # Check service status
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
+            
+            # Check logs
+            echo "Checking Nginx error logs:"
+            sudo tail -n 20 /var/log/nginx/error.log
+            
+            echo "Checking Spring Boot logs:"
+            sudo journalctl -u ${SPRING_SERVICE} --no-pager -n 50
+            
             echo "== Staging deploy done =="
             echo "Staging URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging"
             echo "  Backend API: http://${{ secrets.EC2_HOST }}/staging/api"
+
   deploy-production:
     name: Deploy to PRODUCTION EC2
     needs: build
@@ -229,6 +259,7 @@ jobs:
             SPRING_SERVICE="springboot"
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
+            
             # Debug: List the contents of the app directory
             echo "Contents of ~/app:"
             ls -la ~/app
@@ -236,6 +267,7 @@ jobs:
             ls -la ~/app/build-artifacts
             echo "Contents of ~/app/build-artifacts/frontend:"
             ls -la ~/app/build-artifacts/frontend
+            
             # Frontend - IMPORTANT: Preserve staging directory
             # Create a temporary backup of staging directory
             if [ -d "$NGINX_ROOT/staging" ]; then
@@ -258,6 +290,7 @@ jobs:
             
             # Backend
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
+            
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
               sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
@@ -277,6 +310,7 @@ jobs:
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
             fi
+            
             # Configure Nginx for production
             sudo tee /etc/nginx/sites-available/banking > /dev/null <<EOF
             server {
@@ -317,10 +351,18 @@ jobs:
             if [ -L "/etc/nginx/sites-enabled/default" ]; then
               sudo rm /etc/nginx/sites-enabled/default
             fi
+            
+            # Test Nginx configuration
+            sudo nginx -t
+            if [ $? -ne 0 ]; then
+                echo "ERROR: Nginx configuration test failed"
+                exit 1
+            fi
          
             sudo systemctl restart nginx
             sudo systemctl restart ${SPRING_SERVICE}
             sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
+            
             echo "== Production deploy done =="
             echo "Production URLs:"
             echo "  Frontend: https://banking.cyetechnology.com"
