@@ -81,7 +81,7 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           REMOTE_HOST: ${{ secrets.EC2_HOST }}
           REMOTE_USER: ${{ secrets.EC2_USER }}
-          TARGET: "/home/${{ secrets.EC2_USER }}/staging/"
+          TARGET: "/home/${{ secrets.EC2_USER }}/staging/build-artifacts"
           SOURCE: "build-artifacts/"
 
       - name: Deploy on EC2 (staging)
@@ -282,7 +282,7 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           REMOTE_HOST: ${{ secrets.EC2_HOST }}
           REMOTE_USER: ${{ secrets.EC2_USER }}
-          TARGET: "/home/${{ secrets.EC2_USER }}/app/"
+          TARGET: "/home/${{ secrets.EC2_USER }}/app/build-artifacts"
           SOURCE: "build-artifacts/"
 
       - name: Deploy on EC2 (prod)
