@@ -74,6 +74,8 @@ jobs:
           ls -laR ./build-artifacts
           echo "=== Frontend build contents ==="
           ls -la ./build-artifacts/frontend/build
+          echo "=== Backend target contents ==="
+          ls -la ./build-artifacts/backend/target || echo "Backend target dir not found or empty"
 
       - name: Copy to EC2 (staging)
         uses: appleboy/scp-action@v0.1.7
@@ -97,6 +99,14 @@ jobs:
             STAGING_SERVICE="staging.service"  # Your existing service name
             JAR_FILE="app-staging.jar"
             echo "== Staging deploy start =="
+            
+            # List staging contents for debug
+            echo "=== Contents of $HOME/staging ==="
+            ls -la "$HOME/staging"
+            echo "=== Contents of $HOME/staging/frontend (if exists) ==="
+            ls -la "$HOME/staging/frontend" 2>/dev/null || echo "Frontend dir missing"
+            echo "=== Contents of $HOME/staging/backend (if exists) ==="
+            ls -la "$HOME/staging/backend" 2>/dev/null || echo "Backend dir missing"
             
             # Check directories exist
             if [ ! -d "$HOME/staging/frontend" ]; then
@@ -200,7 +210,13 @@ jobs:
           cp -r frontend/build/* build-artifacts/frontend/build/
 
       - name: List artifacts
-        run: ls -laR ./build-artifacts
+        run: |
+          echo "=== Listing build artifacts ==="
+          ls -laR ./build-artifacts
+          echo "=== Frontend build contents ==="
+          ls -la ./build-artifacts/frontend/build
+          echo "=== Backend target contents ==="
+          ls -la ./build-artifacts/backend/target || echo "Backend target dir not found or empty"
 
       - name: Copy to EC2 (prod)
         uses: appleboy/scp-action@v0.1.7
@@ -223,6 +239,14 @@ jobs:
             PROD_SERVICE="prod.service"  # Your existing service name
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
+            
+            # List app contents for debug
+            echo "=== Contents of $HOME/app ==="
+            ls -la "$HOME/app"
+            echo "=== Contents of $HOME/app/frontend (if exists) ==="
+            ls -la "$HOME/app/frontend" 2>/dev/null || echo "Frontend dir missing"
+            echo "=== Contents of $HOME/app/backend (if exists) ==="
+            ls -la "$HOME/app/backend" 2>/dev/null || echo "Backend dir missing"
             
             # Check directories exist
             if [ ! -d "$HOME/app/frontend" ]; then
