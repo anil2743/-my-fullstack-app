@@ -76,13 +76,11 @@ jobs:
           ls -la ./build-artifacts/frontend/build
 
       - name: Copy to EC2 (staging)
-        uses: easingthemes/ssh-deploy@v4.1.8
-        with:
-          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
-          REMOTE_HOST: ${{ secrets.EC2_HOST }}
-          REMOTE_USER: ${{ secrets.EC2_USER }}
-          TARGET: "/home/${{ secrets.EC2_USER }}/staging/"
-          SOURCE: "build-artifacts/"
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          rsync -avz -e "ssh -o StrictHostKeyChecking=no" build-artifacts/ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/staging/
 
       - name: Deploy on EC2 (staging)
         uses: appleboy/ssh-action@v0.1.7
@@ -98,44 +96,43 @@ jobs:
             JAR_FILE="app-staging.jar"
             echo "== Staging deploy start =="
             
-            # Simple approach: use files directly from build-artifacts directory
-            BUILD_ARTIFACTS_DIR="~/staging/build-artifacts"
-            
             # Check if build-artifacts directory exists
-            if [ ! -d "$BUILD_ARTIFACTS_DIR" ]; then
+            if [ ! -d "~/staging/build-artifacts" ]; then
                 echo "ERROR: build-artifacts directory not found"
                 echo "Contents of ~/staging:"
                 ls -la ~/staging
+                echo "Looking for any build-artifacts directories:"
+                find ~/staging -name "*build*" -type d 2>/dev/null
                 exit 1
             fi
             
             # Check for frontend and backend in build-artifacts
-            if [ ! -d "$BUILD_ARTIFACTS_DIR/frontend" ]; then
+            if [ ! -d "~/staging/build-artifacts/frontend" ]; then
                 echo "ERROR: frontend directory not found in build-artifacts"
                 echo "Contents of build-artifacts:"
-                ls -la "$BUILD_ARTIFACTS_DIR"
+                ls -la ~/staging/build-artifacts
                 exit 1
             fi
             
-            if [ ! -d "$BUILD_ARTIFACTS_DIR/backend" ]; then
+            if [ ! -d "~/staging/build-artifacts/backend" ]; then
                 echo "ERROR: backend directory not found in build-artifacts"
                 echo "Contents of build-artifacts:"
-                ls -la "$BUILD_ARTIFACTS_DIR"
+                ls -la ~/staging/build-artifacts
                 exit 1
             fi
             
             # Check if frontend build exists
-            if [ ! -d "$BUILD_ARTIFACTS_DIR/frontend/build" ]; then
+            if [ ! -d "~/staging/build-artifacts/frontend/build" ]; then
                 echo "ERROR: frontend build directory not found"
                 echo "Contents of build-artifacts/frontend:"
-                ls -la "$BUILD_ARTIFACTS_DIR/frontend"
+                ls -la ~/staging/build-artifacts/frontend
                 exit 1
             fi
             
             # Frontend deployment
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
-            sudo cp -r "$BUILD_ARTIFACTS_DIR/frontend/build/*" "$STAGING_DIR"/
+            sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
             # Verify frontend files
@@ -147,12 +144,12 @@ jobs:
             fi
             
             # Backend deployment
-            if [ -f "$BUILD_ARTIFACTS_DIR/backend/target/*.jar" ]; then
-                cp "$BUILD_ARTIFACTS_DIR/backend/target/*.jar" ~/staging/$JAR_FILE
+            if [ -f "~/staging/build-artifacts/backend/target/*.jar" ]; then
+                cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
             else
                 echo "ERROR: JAR file not found in backend directory"
                 echo "Contents of build-artifacts/backend:"
-                ls -la "$BUILD_ARTIFACTS_DIR/backend"
+                ls -la ~/staging/build-artifacts/backend
                 exit 1
             fi
             
@@ -186,7 +183,7 @@ jobs:
             sudo journalctl -u ${STAGING_SERVICE} --no-pager -n 50
             
             # Clean up temporary files
-            rm -rf "$BUILD_ARTIFACTS_DIR"
+            rm -rf ~/staging/build-artifacts
             
             echo "== Staging deploy done =="
             echo "Staging URLs:"
@@ -230,13 +227,11 @@ jobs:
         run: ls -laR ./build-artifacts
 
       - name: Copy to EC2 (prod)
-        uses: easingthemes/ssh-deploy@v4.1.8
-        with:
-          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
-          REMOTE_HOST: ${{ secrets.EC2_HOST }}
-          REMOTE_USER: ${{ secrets.EC2_USER }}
-          TARGET: "/home/${{ secrets.EC2_USER }}/app/"
-          SOURCE: "build-artifacts/"
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          rsync -avz -e "ssh -o StrictHostKeyChecking=no" build-artifacts/ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/app/
 
       - name: Deploy on EC2 (prod)
         uses: appleboy/ssh-action@v0.1.7
@@ -251,37 +246,36 @@ jobs:
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
             
-            # Simple approach: use files directly from build-artifacts directory
-            BUILD_ARTIFACTS_DIR="~/app/build-artifacts"
-            
             # Check if build-artifacts directory exists
-            if [ ! -d "$BUILD_ARTIFACTS_DIR" ]; then
+            if [ ! -d "~/app/build-artifacts" ]; then
                 echo "ERROR: build-artifacts directory not found"
                 echo "Contents of ~/app:"
                 ls -la ~/app
+                echo "Looking for any build-artifacts directories:"
+                find ~/app -name "*build*" -type d 2>/dev/null
                 exit 1
             fi
             
             # Check for frontend and backend in build-artifacts
-            if [ ! -d "$BUILD_ARTIFACTS_DIR/frontend" ]; then
+            if [ ! -d "~/app/build-artifacts/frontend" ]; then
                 echo "ERROR: frontend directory not found in build-artifacts"
                 echo "Contents of build-artifacts:"
-                ls -la "$BUILD_ARTIFACTS_DIR"
+                ls -la ~/app/build-artifacts
                 exit 1
             fi
             
-            if [ ! -d "$BUILD_ARTIFACTS_DIR/backend" ]; then
+            if [ ! -d "~/app/build-artifacts/backend" ]; then
                 echo "ERROR: backend directory not found in build-artifacts"
                 echo "Contents of build-artifacts:"
-                ls -la "$BUILD_ARTIFACTS_DIR"
+                ls -la ~/app/build-artifacts
                 exit 1
             fi
             
             # Check if frontend build exists
-            if [ ! -d "$BUILD_ARTIFACTS_DIR/frontend/build" ]; then
+            if [ ! -d "~/app/build-artifacts/frontend/build" ]; then
                 echo "ERROR: frontend build directory not found"
                 echo "Contents of build-artifacts/frontend:"
-                ls -la "$BUILD_ARTIFACTS_DIR/frontend"
+                ls -la ~/app/build-artifacts/frontend
                 exit 1
             fi
             
@@ -298,7 +292,7 @@ jobs:
               sudo mv /tmp/staging-backup "$NGINX_ROOT/staging"
             fi
             
-            sudo cp -r "$BUILD_ARTIFACTS_DIR/frontend/build/*" "$NGINX_ROOT"/
+            sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
             # Verify frontend files
@@ -310,12 +304,12 @@ jobs:
             fi
             
             # Backend deployment
-            if [ -f "$BUILD_ARTIFACTS_DIR/backend/target/*.jar" ]; then
-                cp "$BUILD_ARTIFACTS_DIR/backend/target/*.jar" ~/app/$JAR_FILE
+            if [ -f "~/app/build-artifacts/backend/target/*.jar" ]; then
+                cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
             else
                 echo "ERROR: JAR file not found in backend directory"
                 echo "Contents of build-artifacts/backend:"
-                ls -la "$BUILD_ARTIFACTS_DIR/backend"
+                ls -la ~/app/build-artifacts/backend
                 exit 1
             fi
             
@@ -339,7 +333,7 @@ jobs:
             sudo systemctl status ${PROD_SERVICE} --no-pager -n 20
             
             # Clean up temporary files
-            rm -rf "$BUILD_ARTIFACTS_DIR"
+            rm -rf ~/app/build-artifacts
             
             echo "== Production deploy done =="
             echo "Production URLs:"
