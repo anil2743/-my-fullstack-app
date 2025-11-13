@@ -57,18 +57,29 @@ jobs:
           name: backend-jar
           path: ./backend-jar
 
+      - name: Prepare backend JAR
+        run: |
+          JAR_PATH=$(ls ./backend-jar/*.jar | head -1)
+          cp "$JAR_PATH" ./staging-backend.jar
+          echo "Prepared JAR: ./staging-backend.jar"
+
       - name: Build Frontend (Staging)
         run: |
           cd frontend
           npm ci
           CI=false npm run build:staging
 
+      - name: Prepare frontend artifact
+        run: |
+          mkdir -p build-artifacts/frontend/build
+          cp -r frontend/build/* build-artifacts/frontend/build/
+
       - name: List artifacts
         run: |
           echo "=== Listing backend JAR ==="
-          ls -la ./backend-jar/
+          ls -la ./staging-backend.jar
           echo "=== Listing frontend build contents ==="
-          ls -la frontend/build/
+          ls -la build-artifacts/frontend/build
 
       - name: Clean staging dir on EC2
         uses: appleboy/ssh-action@v0.1.7
@@ -78,16 +89,16 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             rm -rf ~/staging/*
-            mkdir -p ~/staging/frontend/build ~/staging/backend
+            mkdir -p ~/staging/backend
 
-      - name: Copy frontend build files to EC2 (staging)
+      - name: Copy frontend to EC2 (staging)
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "frontend/build/*"
-          target: "/home/${{ secrets.EC2_USER }}/staging/frontend/build/"
+          source: "build-artifacts/frontend"
+          target: "/home/${{ secrets.EC2_USER }}/staging/"
 
       - name: Copy backend JAR to EC2 (staging)
         uses: appleboy/scp-action@v0.1.7
@@ -95,7 +106,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "backend-jar/*.jar"
+          source: "staging-backend.jar"
           target: "/home/${{ secrets.EC2_USER }}/staging/backend/"
 
       - name: Deploy on EC2 (staging)
@@ -215,18 +226,29 @@ jobs:
           name: backend-jar
           path: ./backend-jar
 
+      - name: Prepare backend JAR
+        run: |
+          JAR_PATH=$(ls ./backend-jar/*.jar | head -1)
+          cp "$JAR_PATH" ./prod-backend.jar
+          echo "Prepared JAR: ./prod-backend.jar"
+
       - name: Build Frontend (Production)
         run: |
           cd frontend
           npm ci
           CI=false npm run build:production
 
+      - name: Prepare frontend artifact
+        run: |
+          mkdir -p build-artifacts/frontend/build
+          cp -r frontend/build/* build-artifacts/frontend/build/
+
       - name: List artifacts
         run: |
           echo "=== Listing backend JAR ==="
-          ls -la ./backend-jar/
+          ls -la ./prod-backend.jar
           echo "=== Listing frontend build contents ==="
-          ls -la frontend/build/
+          ls -la build-artifacts/frontend/build
 
       - name: Clean app dir on EC2
         uses: appleboy/ssh-action@v0.1.7
@@ -236,16 +258,16 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             rm -rf ~/app/*
-            mkdir -p ~/app/frontend/build ~/app/backend
+            mkdir -p ~/app/backend
 
-      - name: Copy frontend build files to EC2 (prod)
+      - name: Copy frontend to EC2 (prod)
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "frontend/build/*"
-          target: "/home/${{ secrets.EC2_USER }}/app/frontend/build/"
+          source: "build-artifacts/frontend"
+          target: "/home/${{ secrets.EC2_USER }}/app/"
 
       - name: Copy backend JAR to EC2 (prod)
         uses: appleboy/scp-action@v0.1.7
@@ -253,7 +275,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "backend-jar/*.jar"
+          source: "prod-backend.jar"
           target: "/home/${{ secrets.EC2_USER }}/app/backend/"
 
       - name: Deploy on EC2 (prod)
