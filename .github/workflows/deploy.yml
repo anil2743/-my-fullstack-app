@@ -63,12 +63,12 @@ jobs:
           cp "$JAR_PATH" ./staging-backend.jar
           echo "Prepared JAR: ./staging-backend.jar"
 
-      - name: Build Frontend (Staging) - FIXED
+      - name: Build Frontend (Staging) - CRITICAL FIX
         run: |
           cd frontend
           npm ci
-          # Set PUBLIC_URL for staging environment
-          CI=false PUBLIC_URL=/staging/ npm run build:staging
+          # Set PUBLIC_URL for staging environment without trailing slash
+          CI=false PUBLIC_URL=/staging npm run build:staging
           
       - name: Check built frontend
         run: |
@@ -102,7 +102,7 @@ jobs:
             mkdir -p ~/staging/frontend
             mkdir -p ~/staging/backend
 
-      - name: Copy frontend to EC2 (staging) - FIXED
+      - name: Copy frontend to EC2 (staging)
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
@@ -139,7 +139,7 @@ jobs:
             echo "Contents of ~/staging/backend/*.jar:"
             ls -la ~/staging/backend/*.jar
 
-      - name: Fix Nginx Configuration (Staging) - IMPROVED
+      - name: Fix Nginx Configuration (Staging) - CRITICAL FIX
         uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -168,17 +168,17 @@ jobs:
                     return 302 /staging/;
                 }
 
-                # Static assets handling - FIXED
+                # Static assets handling
                 location ~* ^/staging/.*\.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
-                    alias /var/www/html/staging/;
+                    root /var/www/html;
                     expires 1y;
                     add_header Cache-Control "public, immutable";
                 }
 
-                # STAGING FRONTEND - FIXED
-                location ^~ /staging/ {
-                    alias /var/www/html/staging/;
-                    try_files \$uri \$uri/ /index.html;
+                # STAGING FRONTEND - CRITICAL FIX
+                location /staging/ {
+                    root /var/www/html;
+                    try_files \$uri \$uri/ /staging/index.html;
                     
                     # Add headers to help with debugging
                     add_header X-Debug-Location "staging-frontend" always;
@@ -205,7 +205,7 @@ jobs:
               echo "✓ Nginx configuration test passed"
             fi
 
-      - name: Deploy on EC2 (staging) - IMPROVED
+      - name: Deploy on EC2 (staging) - CRITICAL FIX
         uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -268,7 +268,7 @@ jobs:
                 ls -la "$HOME/staging/frontend/build/index.html"
             fi
             
-            # Frontend deployment - IMPROVED
+            # Frontend deployment - CRITICAL FIX
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
             sudo cp -r "$HOME/staging/frontend/build"/* "$STAGING_DIR"/
@@ -284,7 +284,7 @@ jobs:
             # Check asset paths in deployed index.html
             echo "=== Checking asset paths in deployed index.html ==="
             if grep -q 'href="/staging/' "$STAGING_DIR/index.html"; then
-                echo "✓ Asset paths correctly prefixed with /staging/"
+                echo "✓ Asset paths correctly prefixed with /staging"
             else
                 echo "⚠ Warning: Asset paths may not be correctly prefixed"
                 echo "Sample asset paths:"
@@ -467,7 +467,7 @@ jobs:
             mkdir -p ~/app/frontend
             mkdir -p ~/app/backend
 
-      - name: Copy frontend to EC2 (prod) - FIXED
+      - name: Copy frontend to EC2 (prod)
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
