@@ -165,10 +165,10 @@ jobs:
                     add_header Cache-Control "public, immutable";
                 }
 
-                # STAGING FRONTEND
+                # STAGING FRONTEND - FIXED
                 location ^~ /staging/ {
-                    root /var/www/html;
-                    try_files \$uri \$uri/ /staging/index.html;
+                    alias /var/www/html/staging/;
+                    try_files \$uri \$uri/ /index.html;
                 }
             }
             EOF
@@ -368,6 +368,27 @@ jobs:
             echo "Staging URLs:"
             echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging"
             echo "  Backend API: http://${{ secrets.EC2_HOST }}/staging/api"
+
+      - name: Verify Nginx serving staging files
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "=== Verifying Nginx file serving ==="
+            # Test direct file access
+            if [ -f "/var/www/html/staging/index.html" ]; then
+              echo "✓ index.html exists in Nginx root"
+              echo "File size: $(stat -c%s /var/www/html/staging/index.html) bytes"
+              # Test Nginx can access the file
+              echo "=== Testing Nginx response ==="
+              curl -s http://localhost/staging/ | head -c 200
+            else
+              echo "✗ index.html not found in Nginx root"
+              ls -la /var/www/html/staging/
+              exit 1
+            fi
 
   deploy-production:
     name: Deploy to PRODUCTION EC2
@@ -577,4 +598,75 @@ jobs:
             if [ ! -f "$HOME/app/frontend/build/index.html" ]; then
                 echo "ERROR: index.html not found in build directory"
                 ls -la "$HOME/app/frontend/build"
-                exit
+                exit 1
+            fi
+            
+            # Frontend deployment
+            sudo rm -rf "$NGINX_ROOT"/*
+            sudo cp -r "$HOME/app/frontend/build"/* "$NGINX_ROOT"/
+            sudo chown -R www-data:www-data "$NGINX_ROOT"
+            
+            # Verify frontend files
+            if [ ! -f "$NGINX_ROOT/index.html" ]; then
+                echo "ERROR: index.html not found in $NGINX_ROOT"
+                ls -la "$NGINX_ROOT"
+                exit 1
+            fi
+            
+            # Backend deployment
+            if [ -f "$HOME/app/backend"/*.jar ]; then
+                cp "$HOME/app/backend"/*.jar "$HOME/$JAR_FILE"
+                echo "JAR copied successfully to $JAR_FILE"
+            else
+                echo "ERROR: JAR file not found"
+                ls -la "$HOME/app/backend"
+                exit 1
+            fi
+            
+            # Check if systemd service exists
+            if [ ! -f "/etc/systemd/system/${PROD_SERVICE}" ]; then
+                echo "ERROR: Systemd service ${PROD_SERVICE} not found"
+                ls -la /etc/systemd/system/
+                exit 1
+            fi
+            
+            # Restart services
+            sudo systemctl restart nginx
+            sudo systemctl restart ${PROD_SERVICE}
+            
+            # Wait for services to start
+            sleep 3
+            
+            # Check service status
+            sudo systemctl status ${PROD_SERVICE} --no-pager -n 20
+            
+            # Test production site
+            echo "=== Testing production site ==="
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/)
+            echo "HTTP Status Code: $HTTP_CODE"
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+                echo "✓ Production site is accessible"
+                CONTENT=$(curl -s http://localhost/)
+                if [ -z "$CONTENT" ]; then
+                    echo "⚠ Warning: Production site returned empty content"
+                else
+                    echo "✓ Production site has content"
+                    echo "First 100 characters:"
+                    echo "$CONTENT" | head -c 100
+                fi
+            else
+                echo "✗ Production site returned HTTP $HTTP_CODE"
+                echo "=== Nginx error logs ==="
+                sudo tail -n 30 /var/log/nginx/error.log
+            fi
+            
+            # Test backend API
+            echo "=== Testing backend API ==="
+            API_HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/actuator/health || curl -s -o /dev/null -w "%{http_code}" http://localhost/api/health)
+            echo "API HTTP Status Code: $API_HTTP_CODE"
+            
+            echo "== Production deploy done =="
+            echo "Production URLs:"
+            echo "  Frontend: https://banking.cyetechnology.com"
+            echo "  Backend API: https://banking.cyetechnology.com/api"
