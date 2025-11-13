@@ -98,7 +98,7 @@ jobs:
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
-          # Use rsync to copy frontend files
+          # Use rsync to copy frontend files (more reliable than SCP)
           rsync -avz -e "ssh -o StrictHostKeyChecking=no" build-artifacts/frontend/ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/staging/frontend/
 
       - name: Copy backend JAR to EC2 (staging)
@@ -128,6 +128,69 @@ jobs:
             ls -la ~/staging/frontend/build
             echo "Contents of ~/staging/backend/*.jar:"
             ls -la ~/staging/backend/*.jar
+
+      - name: Fix Nginx Configuration (Staging)
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            echo "== Fixing Nginx Configuration for Staging =="
+            
+            # Create corrected staging configuration
+            sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
+            server {
+                listen 80 default_server;
+                server_name _;
+
+                # STAGING API
+                location ^~ /staging/api/ {
+                    proxy_pass http://127.0.0.1:8081;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                }
+
+                # EXACT MATCH /staging → redirect to /staging/
+                location = /staging {
+                    return 302 /staging/;
+                }
+
+                # Static assets handling
+                location ~* ^/staging/.*\.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+                    root /var/www/html;
+                    expires 1y;
+                    add_header Cache-Control "public, immutable";
+                }
+
+                # STAGING FRONTEND
+                location ^~ /staging/ {
+                    root /var/www/html;
+                    try_files \$uri \$uri/ /staging/index.html;
+                }
+            }
+            EOF
+            
+            # Enable staging site
+            if [ ! -L "/etc/nginx/sites-enabled/staging" ]; then
+              sudo ln -s /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
+            fi
+            
+            # Remove default site if exists
+            if [ -L "/etc/nginx/sites-enabled/default" ]; then
+              sudo rm /etc/nginx/sites-enabled/default
+            fi
+            
+            # Test Nginx configuration
+            sudo nginx -t
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Nginx configuration test failed"
+              exit 1
+            else
+              echo "✓ Nginx configuration test passed"
+            fi
 
       - name: Deploy on EC2 (staging)
         uses: appleboy/ssh-action@v0.1.7
@@ -173,6 +236,23 @@ jobs:
                 exit 1
             fi
             
+            # Check if index.html exists in build
+            if [ ! -f "$HOME/staging/frontend/build/index.html" ]; then
+                echo "ERROR: index.html not found in build directory"
+                ls -la "$HOME/staging/frontend/build"
+                exit 1
+            fi
+            
+            # Check index.html content
+            echo "=== Checking index.html content ==="
+            if [ -s "$HOME/staging/frontend/build/index.html" ]; then
+                echo "✓ index.html has content"
+                echo "File size: $(stat -c%s "$HOME/staging/frontend/build/index.html") bytes"
+            else
+                echo "✗ index.html is empty or missing"
+                ls -la "$HOME/staging/frontend/build/index.html"
+            fi
+            
             # Frontend deployment
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
@@ -203,19 +283,86 @@ jobs:
                 exit 1
             fi
             
-            # Test Nginx configuration
-            sudo nginx -t
-            if [ $? -ne 0 ]; then
-                echo "ERROR: Nginx configuration test failed"
-                exit 1
-            fi
-            
             # Restart services
             sudo systemctl restart nginx
             sudo systemctl restart ${STAGING_SERVICE}
             
+            # Wait for services to start
+            sleep 3
+            
             # Check service status
             sudo systemctl status ${STAGING_SERVICE} --no-pager -n 20
+            
+            # Test staging site comprehensively
+            echo "=== Testing staging site ==="
+            
+            # Test 1: Check HTTP status
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/staging/)
+            echo "HTTP Status Code: $HTTP_CODE"
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+                echo "✓ Staging site is accessible"
+                
+                # Test 2: Check content
+                CONTENT=$(curl -s http://localhost/staging/)
+                if [ -z "$CONTENT" ]; then
+                    echo "⚠ Warning: Staging site returned empty content"
+                    
+                    # Test 3: Check if index.html exists on server
+                    if [ -f "$STAGING_DIR/index.html" ]; then
+                        echo "✓ index.html exists on server"
+                        echo "Size: $(stat -c%s "$STAGING_DIR/index.html") bytes"
+                        
+                        # Test 4: Check index.html content on server
+                        if [ -s "$STAGING_DIR/index.html" ]; then
+                            echo "✓ index.html has content on server"
+                            echo "First 300 characters:"
+                            head -c 300 "$STAGING_DIR/index.html"
+                            
+                            # Test 5: Check Nginx error logs
+                            echo "=== Nginx error logs ==="
+                            sudo tail -n 30 /var/log/nginx/error.log
+                            
+                            # Test 6: Check if React app is loading
+                            echo "=== Checking for React app loading issues ==="
+                            if grep -q "react-app" "$STAGING_DIR/index.html"; then
+                                echo "✓ React app root found in index.html"
+                            else
+                                echo "⚠ Warning: React app root not found in index.html"
+                                echo "This might indicate a build issue"
+                            fi
+                        else
+                            echo "✗ index.html is empty on server"
+                        fi
+                    else
+                        echo "✗ index.html does not exist on server"
+                        echo "Contents of $STAGING_DIR:"
+                        ls -la "$STAGING_DIR"
+                    fi
+                else
+                    echo "✓ Staging site has content"
+                    echo "First 100 characters:"
+                    echo "$CONTENT" | head -c 100
+                fi
+            else
+                echo "✗ Staging site returned HTTP $HTTP_CODE"
+                echo "=== Nginx error logs ==="
+                sudo tail -n 30 /var/log/nginx/error.log
+                echo "=== Checking if index.html exists ==="
+                if [ -f "$STAGING_DIR/index.html" ]; then
+                    echo "✓ index.html exists"
+                    echo "Size: $(stat -c%s "$STAGING_DIR/index.html") bytes"
+                else
+                    echo "✗ index.html does not exist"
+                    echo "Contents of $STAGING_DIR:"
+                    ls -la "$STAGING_DIR"
+                fi
+            fi
+            
+            # Test 7: Check backend API
+            echo "=== Testing backend API ==="
+            API_HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/staging/api/actuator/health || curl -s -o /dev/null -w "%{http_code}" http://localhost/staging/api/health)
+            echo "API HTTP Status Code: $API_HTTP_CODE"
             
             echo "== Staging deploy done =="
             echo "Staging URLs:"
@@ -316,6 +463,73 @@ jobs:
             echo "Contents of ~/app/backend/*.jar:"
             ls -la ~/app/backend/*.jar
 
+      - name: Fix Nginx Configuration (Production)
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            echo "== Fixing Nginx Configuration for Production =="
+            
+            # Create corrected production configuration
+            sudo tee /etc/nginx/sites-available/banking > /dev/null <<EOF
+            server {
+                server_name banking.cyetechnology.com;
+
+                # Static assets handling
+                location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+                    root /var/www/html;
+                    expires 1y;
+                    add_header Cache-Control "public, immutable";
+                }
+
+                # Frontend app
+                location / {
+                    root /var/www/html;
+                    try_files \$uri \$uri/ /index.html;
+                }
+
+                # API
+                location ^~ /api/ {
+                    proxy_pass http://127.0.0.1:8080;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                }
+
+                listen 443 ssl; # managed by Certbot
+                ssl_certificate /etc/letsencrypt/live/banking.cyetechnology.com/fullchain.pem; # managed by Certbot
+                ssl_certificate_key /etc/letsencrypt/live/banking.cyetechnology.com/privkey.pem; # managed by Certbot
+                include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+                ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+            }
+            server {
+                if (\$host = banking.cyetechnology.com) {
+                    return 301 https://\$host\$request_uri;
+                } # managed by Certbot
+
+                listen 80;
+                server_name banking.cyetechnology.com;
+                return 404; # managed by Certbot
+            }
+            EOF
+            
+            # Enable production site
+            if [ ! -L "/etc/nginx/sites-enabled/banking" ]; then
+              sudo ln -s /etc/nginx/sites-available/banking /etc/nginx/sites-enabled/
+            fi
+            
+            # Test Nginx configuration
+            sudo nginx -t
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Nginx configuration test failed"
+              exit 1
+            else
+              echo "✓ Nginx configuration test passed"
+            fi
+
       - name: Deploy on EC2 (prod)
         uses: appleboy/ssh-action@v0.1.7
         with:
@@ -359,56 +573,8 @@ jobs:
                 exit 1
             fi
             
-            # Frontend deployment - preserve staging
-            if [ -d "$NGINX_ROOT/staging" ]; then
-              sudo cp -r "$NGINX_ROOT/staging" /tmp/staging-backup
-            fi
-            
-            sudo rm -rf "$NGINX_ROOT"/*
-            
-            if [ -d /tmp/staging-backup ]; then
-              sudo mv /tmp/staging-backup "$NGINX_ROOT/staging"
-            fi
-            
-            sudo cp -r "$HOME/app/frontend/build"/* "$NGINX_ROOT"/
-            sudo chown -R www-data:www-data "$NGINX_ROOT"
-            
-            # Verify frontend files
-            if [ ! -f "$NGINX_ROOT/index.html" ]; then
-                echo "ERROR: index.html not found"
-                ls -la "$NGINX_ROOT"
-                exit 1
-            fi
-            
-            # Backend deployment
-            if [ -f "$HOME/app/backend"/*.jar ]; then
-                cp "$HOME/app/backend"/*.jar "$HOME/app/$JAR_FILE"
-                echo "JAR copied successfully to $JAR_FILE"
-            else
-                echo "ERROR: JAR file not found"
-                ls -la "$HOME/app/backend"
-                exit 1
-            fi
-            
-            # Check if systemd service exists
-            if [ ! -f "/etc/systemd/system/${PROD_SERVICE}" ]; then
-                echo "ERROR: Systemd service ${PROD_SERVICE} not found"
-                ls -la /etc/systemd/system/
-                exit 1
-            fi
-            
-            # Test Nginx configuration
-            sudo nginx -t
-            if [ $? -ne 0 ]; then
-                echo "ERROR: Nginx configuration test failed"
-                exit 1
-            fi
-         
-            sudo systemctl restart nginx
-            sudo systemctl restart ${PROD_SERVICE}
-            sudo systemctl status ${PROD_SERVICE} --no-pager -n 20
-            
-            echo "== Production deploy done =="
-            echo "Production URLs:"
-            echo "  Frontend: https://banking.cyetechnology.com"
-            echo "  Backend API: https://banking.cyetechnology.com/api"
+            # Check if index.html exists in build
+            if [ ! -f "$HOME/app/frontend/build/index.html" ]; then
+                echo "ERROR: index.html not found in build directory"
+                ls -la "$HOME/app/frontend/build"
+                exit
