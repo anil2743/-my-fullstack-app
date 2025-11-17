@@ -1,20 +1,18 @@
-import axios from "axios";
-
-// Use the domain for production
-const base = "https://banking.cyetechnology.com/api";
+import axios from 'axios';
 
 const api = axios.create({
-    baseURL: base,
+    baseURL: '/api',  // Changed: Relative path—proxied by nginx to backend
 });
 
-// Attach JWT token automatically
-api.interceptors.request.use(
-    (config) => {
-        const token = localStorage.getItem("authToken");
-        if (token) config.headers.Authorization = `Bearer ${token}`;
-        return config;
-    },
-    (error) => Promise.reject(error)
-);
+// Interceptor to add JWT to every request
+api.interceptors.request.use(config => {
+    const token = localStorage.getItem('authToken');
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+}, error => {
+    return Promise.reject(error);
+});
 
 export default api;
