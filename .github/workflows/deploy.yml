@@ -31,10 +31,15 @@ jobs:
           cd frontend
           npm ci
           if [ "${{ github.ref }}" = "refs/heads/staging" ]; then
+            echo "Building for staging environment"
             CI=false npm run build:staging
           else
+            echo "Building for production environment"
             CI=false npm run build:production
           fi
+          # Verify build output
+          echo "Build completed. Contents of build directory:"
+          ls -la build/
 
       - name: Build Backend (Spring Boot)
         run: |
@@ -92,6 +97,7 @@ jobs:
             SPRING_SERVICE="springboot-staging"
             JAR_FILE="app-staging.jar"
             echo "== Staging deploy start =="
+            
             # Debug: List the contents of the staging directory
             echo "Contents of ~/staging:"
             ls -la ~/staging
@@ -99,15 +105,27 @@ jobs:
             ls -la ~/staging/build-artifacts
             echo "Contents of ~/staging/build-artifacts/frontend:"
             ls -la ~/staging/build-artifacts/frontend
+            echo "Contents of ~/staging/build-artifacts/frontend/build:"
+            ls -la ~/staging/build-artifacts/frontend/build
+            
             # Frontend
             sudo mkdir -p "$STAGING_DIR"
             sudo rm -rf "$STAGING_DIR"/*
             sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_DIR"/
             sudo chown -R www-data:www-data "$STAGING_DIR"
             
+            # Verify files were copied
+            echo "Contents of $STAGING_DIR after copy:"
+            ls -la "$STAGING_DIR"
+            
+            # Check index.html content
+            echo "First 10 lines of index.html:"
+            head -n 10 "$STAGING_DIR/index.html"
+            
             # Backend
             mkdir -p ~/staging/backend
             cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
+            
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
               sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
@@ -143,6 +161,7 @@ jobs:
               sudo sed -i "/\[Service\]/a Environment=\"ENCRYPTION_KEY=${ENCRYPTION_KEY}\"" /etc/systemd/system/${SPRING_SERVICE}.service
               sudo systemctl daemon-reload
             fi
+            
             # Configure Nginx for staging
             sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
             server {
@@ -164,6 +183,11 @@ jobs:
             # Enable staging site
             if [ ! -L "/etc/nginx/sites-enabled/staging" ]; then
               sudo ln -s /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
+            fi
+            
+            # Remove default site if exists in sites-enabled
+            if [ -L "/etc/nginx/sites-enabled/default" ]; then
+              sudo rm /etc/nginx/sites-enabled/default
             fi
             
             sudo systemctl restart nginx
@@ -213,6 +237,7 @@ jobs:
             SPRING_SERVICE="springboot"
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
+            
             # Debug: List the contents of the app directory
             echo "Contents of ~/app:"
             ls -la ~/app
@@ -220,14 +245,26 @@ jobs:
             ls -la ~/app/build-artifacts
             echo "Contents of ~/app/build-artifacts/frontend:"
             ls -la ~/app/build-artifacts/frontend
+            echo "Contents of ~/app/build-artifacts/frontend/build:"
+            ls -la ~/app/build-artifacts/frontend/build
+            
             # Frontend
             sudo mkdir -p "$NGINX_ROOT"
             sudo rm -rf "$NGINX_ROOT"/*
             sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
+            # Verify files were copied
+            echo "Contents of $NGINX_ROOT after copy:"
+            ls -la "$NGINX_ROOT"
+            
+            # Check index.html content
+            echo "First 10 lines of index.html:"
+            head -n 10 "$NGINX_ROOT/index.html"
+            
             # Backend
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
+            
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
               sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
@@ -263,6 +300,7 @@ jobs:
               sudo sed -i "/\[Service\]/a Environment=\"ENCRYPTION_KEY=${ENCRYPTION_KEY}\"" /etc/systemd/system/${SPRING_SERVICE}.service
               sudo systemctl daemon-reload
             fi
+            
             # Configure Nginx for production
             sudo tee /etc/nginx/sites-available/production > /dev/null <<EOF
             server {
