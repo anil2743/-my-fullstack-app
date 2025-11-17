@@ -1,5 +1,5 @@
 name: CI/CD Deploy React + Spring Boot to EC2
-Trigger deployment on push to staging or main, and on PR to staging
+#Trigger deployment on push to staging or main, and on PR to staging
 on:
   push:
     branches: 
