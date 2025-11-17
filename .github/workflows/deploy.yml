@@ -1,155 +1,248 @@
-name: CI/CD Deploy React + Spring Boot to EC2 (Staging & Prod)
-
+name: CI/CD Deploy React + Spring Boot to EC2
+Trigger deployment on push to staging or main, and on PR to staging
 on:
   push:
-    branches: [ staging, main, master ]
+    branches: 
+      - staging
+      - master
   pull_request:
-    branches: [ staging ]
+    branches: 
+      - staging
 
 jobs:
   build:
-    name: Build backend
+    name: Build React and Spring Boot
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: Checkout repo
+      # 1 Checkout your repo
+      - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Setup Java 17
+        
+      # 2 Setup Java 17 for backend
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Build Backend (Spring Boot)
-        run: |
-          cd backend
-          mvn -B -q -DskipTests clean package
-      - name: Upload backend artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-jar
-          path: |
-            backend/target/*.jar
-
-  deploy-staging:
-    name: Deploy to STAGING EC2
-    needs: build
-    runs-on: ubuntu-latest
-    if: >
-      (github.ref == 'refs/heads/staging' && github.event_name == 'push') ||
-      (github.event_name == 'pull_request' && github.base_ref == 'staging' && 
-       github.event.pull_request.head.repo.full_name == github.repository)
-    environment: staging
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
+          
+      # 3 Setup Node.js for frontend
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-
-      - name: Download backend artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: backend-jar
-          path: ./backend-jar
-
-      - name: Prepare backend JAR
+          
+      # 4 Build Backend (Spring Boot)
+      - name: Build Backend JAR
         run: |
-          JAR_PATH=$(ls ./backend-jar/*.jar | head -1)
-          cp "$JAR_PATH" ./staging-backend.jar
-          echo "Prepared JAR: ./staging-backend.jar"
-
-      - name: Build Frontend (Staging) - CRITICAL FIX
+          cd backend
+          mvn clean package -DskipTests
+          
+      # 5 Verify JAR file exists
+      - name: Verify JAR file
+        run: |
+          echo "=== Listing target directory ==="
+          ls -la backend/target/
+          
+          echo "=== Checking for JAR files ==="
+          if ls backend/target/*.jar 1> /dev/null 2>&1; then
+            echo "Found JAR files:"
+            ls -la backend/target/*.jar
+            JAR_FILE=$(ls backend/target/*.jar | head -1)
+            echo "JAR file: $JAR_FILE"
+            
+            # Verify it's a file, not directory
+            if [ -d "$JAR_FILE" ]; then
+              echo "ERROR: $JAR_FILE is a directory, not a file!"
+              exit 1
+            fi
+            
+            # Copy to a known location with correct name
+            cp "$JAR_FILE" ./app.jar
+            echo "JAR_FILE copied to ./app.jar"
+            
+            # Verify the copied file has content
+            if [ ! -s "./app.jar" ]; then
+              echo "ERROR: app.jar is empty!"
+              exit 1
+            fi
+          else
+            echo "ERROR: No JAR files found in backend/target directory"
+            exit 1
+          fi
+          
+      # 6 Build Frontend (React)
+      - name: Build Frontend
         run: |
           cd frontend
           npm ci
-          # Set PUBLIC_URL for staging environment without trailing slash
-          CI=false PUBLIC_URL=/staging npm run build:staging
+          if [ "${{ github.ref }}" = "refs/heads/staging" ]; then
+            CI=false PUBLIC_URL=/staging npm run build:staging
+          else
+            CI=false npm run build:production
+          fi
           
-      - name: Check built frontend
+      # 7 Verify Frontend build
+      - name: Verify Frontend build
         run: |
-          echo "=== Checking built frontend ==="
+          echo "=== Listing frontend build directory ==="
           ls -la frontend/build/
-          echo "=== Checking index.html ==="
-          head -20 frontend/build/index.html
-          echo "=== Checking asset paths ==="
-          grep -E 'href="[^"]*\.js|src="[^"]*\.js"' frontend/build/index.html | head -5
-
+          
+          echo "=== Checking for index.html ==="
+          if [ -f "frontend/build/index.html" ] && [ -s "frontend/build/index.html" ]; then
+            echo "✓ index.html found with content"
+            ls -la frontend/build/index.html
+          else
+            echo "✗ index.html not found or empty"
+            exit 1
+          fi
+          
+      # 8 Prepare frontend artifact
       - name: Prepare frontend artifact
         run: |
-          mkdir -p build-artifacts/frontend/build
-          cp -r frontend/build/* build-artifacts/frontend/build/
-
-      - name: List artifacts
-        run: |
-          echo "=== Listing backend JAR ==="
-          ls -la ./staging-backend.jar
-          echo "=== Listing frontend build contents ==="
-          ls -la build-artifacts/frontend/build
-
-      - name: Clean staging dir on EC2
-        uses: appleboy/ssh-action@v0.1.7
+          mkdir -p frontend-build
+          cp -r frontend/build/* frontend-build/
+          
+      # 9 Upload JAR artifact for deployment jobs
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            rm -rf ~/staging/*
-            mkdir -p ~/staging/frontend
-            mkdir -p ~/staging/backend
+          name: jar-file
+          path: ./app.jar
+          
+      # 10 Upload frontend artifact for deployment jobs
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: ./frontend-build/
 
-      - name: Copy frontend to EC2 (staging)
+  deploy-staging:
+    name: Deploy to Staging
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/staging'
+    
+    steps:
+      # 1 Download JAR artifact
+      - name: Download JAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: jar-file
+          path: ./
+          
+      # 2 Download frontend artifact
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: ./frontend-build
+          
+      # 3 Verify artifacts were downloaded
+      - name: Verify artifacts
+        run: |
+          echo "=== Checking current directory ==="
+          ls -la
+          
+          echo "=== Checking if app.jar exists and has content ==="
+          if [ -f "./app.jar" ] && [ -s "./app.jar" ]; then
+            echo "✓ app.jar found with content"
+            ls -la ./app.jar
+          else
+            echo "✗ app.jar not found or empty"
+            exit 1
+          fi
+          
+          echo "=== Checking if frontend build exists ==="
+          if [ -d "./frontend-build" ] && [ -f "./frontend-build/index.html" ]; then
+            echo "✓ frontend build found"
+            ls -la ./frontend-build
+          else
+            echo "✗ frontend build not found or incomplete"
+            exit 1
+          fi
+          
+      # 4 Create SSH key file
+      - name: Create SSH key file
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
-          # Use rsync to copy frontend files
-          rsync -avz -e "ssh -o StrictHostKeyChecking=no" build-artifacts/frontend/ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/staging/frontend/
-
-      - name: Copy backend JAR to EC2 (staging)
-        uses: appleboy/scp-action@v0.1.7
+      # 5 Test SSH connection
+      - name: Test SSH connection
+        run: |
+          echo "=== Testing SSH connection ==="
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "echo 'SSH connection successful'"
+          
+      # 6 Deploy JAR to Staging using rsync
+      - name: Deploy JAR to Staging
+        uses: burnett01/rsync-deployments@5.2.1
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: "staging-backend.jar"
-          target: "/home/${{ secrets.EC2_USER }}/staging/backend/"
-
-      - name: Verify files on EC2 (staging)
-        uses: appleboy/ssh-action@v0.1.7
+          switches: -avz
+          path: ./app.jar
+          remote_path: /tmp/staging.jar
+          remote_host: ${{ secrets.EC2_HOST }}
+          remote_user: ${{ secrets.EC2_USER }}
+          remote_key: ${{ secrets.EC2_SSH_KEY }}
+          
+      # 7 Deploy Frontend to Staging using rsync
+      - name: Deploy Frontend to Staging
+        uses: burnett01/rsync-deployments@5.2.1
+        with:
+          switches: -avz
+          path: ./frontend-build/
+          remote_path: /tmp/frontend-staging/
+          remote_host: ${{ secrets.EC2_HOST }}
+          remote_user: ${{ secrets.EC2_USER }}
+          remote_key: ${{ secrets.EC2_SSH_KEY }}
+          
+      # 8 Configure and Restart Services
+      - name: Configure and Restart Services
+        uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            echo "=== Verifying files on EC2 ==="
-            echo "Contents of ~/staging:"
-            ls -la ~/staging
-            echo "Contents of ~/staging/frontend:"
-            ls -la ~/staging/frontend
-            echo "Contents of ~/staging/backend:"
-            ls -la ~/staging/backend
-            echo "Contents of ~/staging/frontend/build:"
-            ls -la ~/staging/frontend/build
-            echo "Contents of ~/staging/backend/*.jar:"
-            ls -la ~/staging/backend/*.jar
-
-      - name: Fix Nginx Configuration (Staging) - CRITICAL FIX
-        uses: appleboy/ssh-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            set -e
-            echo "== Fixing Nginx Configuration for Staging =="
+            echo "=== Starting Staging Deployment ==="
             
-            # Create corrected staging configuration
+            # Verify the files were created and have content
+            echo "1. Verifying JAR file in temp location..."
+            if [ -f "/tmp/staging.jar" ] && [ -s "/tmp/staging.jar" ]; then
+              echo "✓ staging.jar created with content"
+              ls -la /tmp/staging.jar
+            else
+              echo "✗ staging.jar not found or empty in /tmp"
+              exit 1
+            fi
+            
+            echo "2. Verifying frontend build in temp location..."
+            if [ -f "/tmp/frontend-staging/index.html" ] && [ -s "/tmp/frontend-staging/index.html" ]; then
+              echo "✓ frontend build created with content"
+              ls -la /tmp/frontend-staging
+            else
+              echo "✗ frontend build not found or incomplete in /tmp"
+              exit 1
+            fi
+            
+            # Move JAR file to application directory
+            echo "3. Moving JAR file to application directory..."
+            sudo mkdir -p /opt/app/staging
+            sudo mv /tmp/staging.jar /opt/app/staging/app.jar
+            sudo chown ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /opt/app/staging/app.jar
+            sudo chmod 644 /opt/app/staging/app.jar
+            
+            # Move frontend files to web directory
+            echo "4. Moving frontend files to web directory..."
+            sudo mkdir -p /var/www/html/staging
+            sudo rm -rf /var/www/html/staging/*
+            sudo mv /tmp/frontend-staging/* /var/www/html/staging/
+            sudo chown -R www-data:www-data /var/www/html/staging
+            sudo chmod -R 755 /var/www/html/staging
+            
+            # Configure Nginx for staging
+            echo "5. Configuring Nginx for staging..."
             sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
             server {
                 listen 80 default_server;
@@ -175,7 +268,7 @@ jobs:
                     add_header Cache-Control "public, immutable";
                 }
 
-                # STAGING FRONTEND - CRITICAL FIX
+                # STAGING FRONTEND
                 location /staging/ {
                     root /var/www/html;
                     try_files \$uri \$uri/ /staging/index.html;
@@ -197,6 +290,7 @@ jobs:
             fi
             
             # Test Nginx configuration
+            echo "6. Testing Nginx configuration..."
             sudo nginx -t
             if [ $? -ne 0 ]; then
               echo "ERROR: Nginx configuration test failed"
@@ -204,318 +298,193 @@ jobs:
             else
               echo "✓ Nginx configuration test passed"
             fi
+            
+            # Create or update systemd service for staging
+            echo "7. Setting up systemd service for staging..."
+            sudo tee /etc/systemd/system/staging.service > /dev/null <<EOF
+            [Unit]
+            Description=Staging Spring Boot Application
+            After=syslog.target network.target
 
-      - name: Deploy on EC2 (staging) - CRITICAL FIX
-        uses: appleboy/ssh-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            set -e
-            NGINX_ROOT="/var/www/html"
-            STAGING_DIR="$NGINX_ROOT/staging"
-            STAGING_SERVICE="staging.service"
-            JAR_FILE="app-staging.jar"
-            echo "== Staging deploy start =="
+            [Service]
+            User=${{ secrets.EC2_USER }}
+            WorkingDirectory=/opt/app/staging
+            ExecStart=/usr/bin/java -jar /opt/app/staging/app.jar
+            SuccessExitStatus=143
+            Restart=on-failure
+            RestartSec=10
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
             
-            # List staging contents for debug
-            echo "=== Contents of $HOME/staging ==="
-            ls -la "$HOME/staging"
-            echo "=== Contents of $HOME/staging/frontend ==="
-            ls -la "$HOME/staging/frontend"
-            echo "=== Contents of $HOME/staging/backend ==="
-            ls -la "$HOME/staging/backend"
-            echo "=== Contents of $HOME/staging/frontend/build ==="
-            ls -la "$HOME/staging/frontend/build"
-            
-            # Check directories exist
-            if [ ! -d "$HOME/staging/frontend" ]; then
-                echo "ERROR: frontend directory not found"
-                ls -la "$HOME/staging"
-                exit 1
-            fi
-            
-            if [ ! -d "$HOME/staging/backend" ]; then
-                echo "ERROR: backend directory not found"
-                ls -la "$HOME/staging"
-                exit 1
-            fi
-            
-            # Check if frontend build exists
-            if [ ! -d "$HOME/staging/frontend/build" ]; then
-                echo "ERROR: frontend build directory not found"
-                ls -la "$HOME/staging/frontend"
-                exit 1
-            fi
-            
-            # Check if index.html exists in build
-            if [ ! -f "$HOME/staging/frontend/build/index.html" ]; then
-                echo "ERROR: index.html not found in build directory"
-                ls -la "$HOME/staging/frontend/build"
-                exit 1
-            fi
-            
-            # Check index.html content
-            echo "=== Checking index.html content ==="
-            if [ -s "$HOME/staging/frontend/build/index.html" ]; then
-                echo "✓ index.html has content"
-                echo "File size: $(stat -c%s "$HOME/staging/frontend/build/index.html") bytes"
-                echo "First 10 lines:"
-                head -n 10 "$HOME/staging/frontend/build/index.html"
-            else
-                echo "✗ index.html is empty or missing"
-                ls -la "$HOME/staging/frontend/build/index.html"
-            fi
-            
-            # Frontend deployment - CRITICAL FIX
-            sudo mkdir -p "$STAGING_DIR"
-            sudo rm -rf "$STAGING_DIR"/*
-            sudo cp -r "$HOME/staging/frontend/build"/* "$STAGING_DIR"/
-            sudo chown -R www-data:www-data "$STAGING_DIR"
-            
-            # Verify frontend files
-            if [ ! -f "$STAGING_DIR/index.html" ]; then
-                echo "ERROR: index.html not found in $STAGING_DIR"
-                ls -la "$STAGING_DIR"
-                exit 1
-            fi
-            
-            # Check asset paths in deployed index.html
-            echo "=== Checking asset paths in deployed index.html ==="
-            if grep -q 'href="/staging/' "$STAGING_DIR/index.html"; then
-                echo "✓ Asset paths correctly prefixed with /staging"
-            else
-                echo "⚠ Warning: Asset paths may not be correctly prefixed"
-                echo "Sample asset paths:"
-                grep -E 'href="[^"]*\.js|src="[^"]*\.js' "$STAGING_DIR/index.html" | head -3
-            fi
-            
-            # Backend deployment
-            if [ -f "$HOME/staging/backend"/*.jar ]; then
-                cp "$HOME/staging/backend"/*.jar "$HOME/staging/$JAR_FILE"
-                echo "JAR copied successfully to $JAR_FILE"
-            else
-                echo "ERROR: JAR file not found"
-                ls -la "$HOME/staging/backend"
-                exit 1
-            fi
-            
-            # Check if systemd service exists
-            if [ ! -f "/etc/systemd/system/${STAGING_SERVICE}" ]; then
-                echo "ERROR: Systemd service ${STAGING_SERVICE} not found"
-                ls -la /etc/systemd/system/
-                exit 1
-            fi
+            # Reload systemd
+            sudo systemctl daemon-reload
             
             # Restart services
+            echo "8. Restarting services..."
             sudo systemctl restart nginx
-            sudo systemctl restart ${STAGING_SERVICE}
+            sudo systemctl restart staging
             
             # Wait for services to start
-            sleep 5
+            echo "9. Waiting for services to start..."
+            sleep 30
+            
+            # Verify deployment
+            echo "10. Verifying deployment..."
+            ls -la /var/www/html/staging/
+            ls -la /opt/app/staging/
             
             # Check service status
-            sudo systemctl status ${STAGING_SERVICE} --no-pager -n 20
+            echo "11. Checking service status..."
+            sudo systemctl status staging --no-pager -n 20
             
-            # Test staging site comprehensively
-            echo "=== Testing staging site ==="
-            
-            # Test 1: Check HTTP status
+            # Test staging site
+            echo "12. Testing staging site..."
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/staging/)
             echo "HTTP Status Code: $HTTP_CODE"
             
             if [ "$HTTP_CODE" = "200" ]; then
-                echo "✓ Staging site is accessible"
-                
-                # Test 2: Check content
-                CONTENT=$(curl -s http://localhost/staging/)
-                if [ -z "$CONTENT" ]; then
-                    echo "⚠ Warning: Staging site returned empty content"
-                    
-                    # Test 3: Check if index.html exists on server
-                    if [ -f "$STAGING_DIR/index.html" ]; then
-                        echo "✓ index.html exists on server"
-                        echo "Size: $(stat -c%s "$STAGING_DIR/index.html") bytes"
-                        
-                        # Test 4: Check index.html content on server
-                        if [ -s "$STAGING_DIR/index.html" ]; then
-                            echo "✓ index.html has content on server"
-                            echo "First 300 characters:"
-                            head -c 300 "$STAGING_DIR/index.html"
-                            
-                            # Test 5: Check Nginx error logs
-                            echo "=== Nginx error logs ==="
-                            sudo tail -n 30 /var/log/nginx/error.log
-                            
-                            # Test 6: Check if React app is loading
-                            echo "=== Checking for React app loading issues ==="
-                            if grep -q "react-app" "$STAGING_DIR/index.html"; then
-                                echo "✓ React app root found in index.html"
-                            else
-                                echo "⚠ Warning: React app root not found in index.html"
-                                echo "This might indicate a build issue"
-                            fi
-                            
-                            # Test 7: Check asset loading
-                            echo "=== Checking asset loading ==="
-                            ASSET_URL=$(grep -oP 'href="\K[^"]*\.js[^"]*' "$STAGING_DIR/index.html" | head -1)
-                            if [ -n "$ASSET_URL" ]; then
-                                echo "Testing asset: $ASSET_URL"
-                                ASSET_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost$ASSET_URL")
-                                echo "Asset HTTP Status: $ASSET_CODE"
-                                if [ "$ASSET_CODE" != "200" ]; then
-                                    echo "⚠ Warning: Asset not loading properly"
-                                fi
-                            fi
-                        else
-                            echo "✗ index.html is empty on server"
-                        fi
-                    else
-                        echo "✗ index.html does not exist on server"
-                        echo "Contents of $STAGING_DIR:"
-                        ls -la "$STAGING_DIR"
-                    fi
-                else
-                    echo "✓ Staging site has content"
-                    echo "First 100 characters:"
-                    echo "$CONTENT" | head -c 100
-                fi
+              echo "✓ Staging site is accessible"
             else
-                echo "✗ Staging site returned HTTP $HTTP_CODE"
-                echo "=== Nginx error logs ==="
-                sudo tail -n 30 /var/log/nginx/error.log
-                echo "=== Checking if index.html exists ==="
-                if [ -f "$STAGING_DIR/index.html" ]; then
-                    echo "✓ index.html exists"
-                    echo "Size: $(stat -c%s "$STAGING_DIR/index.html") bytes"
-                else
-                    echo "✗ index.html does not exist"
-                    echo "Contents of $STAGING_DIR:"
-                    ls -la "$STAGING_DIR"
-                fi
+              echo "✗ Staging site returned HTTP $HTTP_CODE"
+              echo "=== Nginx error logs ==="
+              sudo tail -n 30 /var/log/nginx/error.log
             fi
             
-            # Test 8: Check backend API
-            echo "=== Testing backend API ==="
+            # Test backend API
+            echo "13. Testing backend API..."
             API_HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/staging/api/actuator/health || curl -s -o /dev/null -w "%{http_code}" http://localhost/staging/api/health)
             echo "API HTTP Status Code: $API_HTTP_CODE"
             
-            # Test 9: Check Nginx access logs for asset 404s
-            echo "=== Checking Nginx access logs for asset 404s ==="
-            sudo tail -n 100 /var/log/nginx/access.log | grep ' 404 ' | grep -E '\.(js|css|png|jpg|jpeg|gif|ico|svg)' || echo "No asset 404s found"
-            
-            echo "== Staging deploy done =="
-            echo "Staging URLs:"
-            echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging"
-            echo "  Backend API: http://${{ secrets.EC2_HOST }}/staging/api"
+            echo "=== Staging Deployment Completed ==="
 
   deploy-production:
-    name: Deploy to PRODUCTION EC2
+    name: Deploy to Production
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    environment: production
-
+    if: github.ref == 'refs/heads/master'
+    
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Download backend artifact
+      # 1 Download JAR artifact
+      - name: Download JAR artifact
         uses: actions/download-artifact@v4
         with:
-          name: backend-jar
-          path: ./backend-jar
-
-      - name: Prepare backend JAR
-        run: |
-          JAR_PATH=$(ls ./backend-jar/*.jar | head -1)
-          cp "$JAR_PATH" ./prod-backend.jar
-          echo "Prepared JAR: ./prod-backend.jar"
-
-      - name: Build Frontend (Production)
-        run: |
-          cd frontend
-          npm ci
-          CI=false npm run build:production
-
-      - name: Prepare frontend artifact
-        run: |
-          mkdir -p build-artifacts/frontend/build
-          cp -r frontend/build/* build-artifacts/frontend/build/
-
-      - name: List artifacts
-        run: |
-          echo "=== Listing backend JAR ==="
-          ls -la ./prod-backend.jar
-          echo "=== Listing frontend build contents ==="
-          ls -la build-artifacts/frontend/build
-
-      - name: Clean app dir on EC2
-        uses: appleboy/ssh-action@v0.1.7
+          name: jar-file
+          path: ./
+          
+      # 2 Download frontend artifact
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            rm -rf ~/app/*
-            mkdir -p ~/app/frontend
-            mkdir -p ~/app/backend
-
-      - name: Copy frontend to EC2 (prod)
+          name: frontend-build
+          path: ./frontend-build
+          
+      # 3 Verify artifacts were downloaded
+      - name: Verify artifacts
+        run: |
+          echo "=== Checking current directory ==="
+          ls -la
+          
+          echo "=== Checking if app.jar exists and has content ==="
+          if [ -f "./app.jar" ] && [ -s "./app.jar" ]; then
+            echo "✓ app.jar found with content"
+            ls -la ./app.jar
+          else
+            echo "✗ app.jar not found or empty"
+            exit 1
+          fi
+          
+          echo "=== Checking if frontend build exists ==="
+          if [ -d "./frontend-build" ] && [ -f "./frontend-build/index.html" ]; then
+            echo "✓ frontend build found"
+            ls -la ./frontend-build
+          else
+            echo "✗ frontend build not found or incomplete"
+            exit 1
+          fi
+          
+      # 4 Create SSH key file
+      - name: Create SSH key file
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
-          # Use rsync to copy frontend files
-          rsync -avz -e "ssh -o StrictHostKeyChecking=no" build-artifacts/frontend/ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/app/frontend/
-
-      - name: Copy backend JAR to EC2 (prod)
-        uses: appleboy/scp-action@v0.1.7
+      # 5 Test SSH connection
+      - name: Test SSH connection
+        run: |
+          echo "=== Testing SSH connection ==="
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "echo 'SSH connection successful'"
+          
+      # 6 Deploy JAR to Production using rsync
+      - name: Deploy JAR to Production
+        uses: burnett01/rsync-deployments@5.2.1
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: "prod-backend.jar"
-          target: "/home/${{ secrets.EC2_USER }}/app/backend/"
-
-      - name: Verify files on EC2 (prod)
-        uses: appleboy/ssh-action@v0.1.7
+          switches: -avz
+          path: ./app.jar
+          remote_path: /tmp/production.jar
+          remote_host: ${{ secrets.EC2_HOST }}
+          remote_user: ${{ secrets.EC2_USER }}
+          remote_key: ${{ secrets.EC2_SSH_KEY }}
+          
+      # 7 Deploy Frontend to Production using rsync
+      - name: Deploy Frontend to Production
+        uses: burnett01/rsync-deployments@5.2.1
+        with:
+          switches: -avz
+          path: ./frontend-build/
+          remote_path: /tmp/frontend-production/
+          remote_host: ${{ secrets.EC2_HOST }}
+          remote_user: ${{ secrets.EC2_USER }}
+          remote_key: ${{ secrets.EC2_SSH_KEY }}
+          
+      # 8 Configure and Restart Services
+      - name: Configure and Restart Services
+        uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            echo "=== Verifying files on EC2 ==="
-            echo "Contents of ~/app:"
-            ls -la ~/app
-            echo "Contents of ~/app/frontend:"
-            ls -la ~/app/frontend
-            echo "Contents of ~/app/backend:"
-            ls -la ~/app/backend
-            echo "Contents of ~/app/frontend/build:"
-            ls -la ~/app/frontend/build
-            echo "Contents of ~/app/backend/*.jar:"
-            ls -la ~/app/backend/*.jar
-
-      - name: Fix Nginx Configuration (Production)
-        uses: appleboy/ssh-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            set -e
-            echo "== Fixing Nginx Configuration for Production =="
+            echo "=== Starting Production Deployment ==="
             
-            # Create corrected production configuration
-            sudo tee /etc/nginx/sites-available/banking > /dev/null <<EOF
+            # Verify the files were created and have content
+            echo "1. Verifying JAR file in temp location..."
+            if [ -f "/tmp/production.jar" ] && [ -s "/tmp/production.jar" ]; then
+              echo "✓ production.jar created with content"
+              ls -la /tmp/production.jar
+            else
+              echo "✗ production.jar not found or empty in /tmp"
+              exit 1
+            fi
+            
+            echo "2. Verifying frontend build in temp location..."
+            if [ -f "/tmp/frontend-production/index.html" ] && [ -s "/tmp/frontend-production/index.html" ]; then
+              echo "✓ frontend build created with content"
+              ls -la /tmp/frontend-production
+            else
+              echo "✗ frontend build not found or incomplete in /tmp"
+              exit 1
+            fi
+            
+            # Move JAR file to application directory
+            echo "3. Moving JAR file to application directory..."
+            sudo mkdir -p /opt/app/production
+            sudo mv /tmp/production.jar /opt/app/production/app.jar
+            sudo chown ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /opt/app/production/app.jar
+            sudo chmod 644 /opt/app/production/app.jar
+            
+            # Move frontend files to web directory
+            echo "4. Moving frontend files to web directory..."
+            sudo rm -rf /var/www/html/*
+            sudo mv /tmp/frontend-production/* /var/www/html/
+            sudo chown -R www-data:www-data /var/www/html
+            sudo chmod -R 755 /var/www/html
+            
+            # Configure Nginx for production
+            echo "5. Configuring Nginx for production..."
+            sudo tee /etc/nginx/sites-available/production > /dev/null <<EOF
             server {
                 server_name banking.cyetechnology.com;
 
@@ -558,11 +527,12 @@ jobs:
             EOF
             
             # Enable production site
-            if [ ! -L "/etc/nginx/sites-enabled/banking" ]; then
-              sudo ln -s /etc/nginx/sites-available/banking /etc/nginx/sites-enabled/
+            if [ ! -L "/etc/nginx/sites-enabled/production" ]; then
+              sudo ln -s /etc/nginx/sites-available/production /etc/nginx/sites-enabled/
             fi
             
             # Test Nginx configuration
+            echo "6. Testing Nginx configuration..."
             sudo nginx -t
             if [ $? -ne 0 ]; then
               echo "ERROR: Nginx configuration test failed"
@@ -570,123 +540,63 @@ jobs:
             else
               echo "✓ Nginx configuration test passed"
             fi
+            
+            # Create or update systemd service for production
+            echo "7. Setting up systemd service for production..."
+            sudo tee /etc/systemd/system/production.service > /dev/null <<EOF
+            [Unit]
+            Description=Production Spring Boot Application
+            After=syslog.target network.target
 
-      - name: Deploy on EC2 (prod)
-        uses: appleboy/ssh-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            set -e
-            NGINX_ROOT="/var/www/html"
-            PROD_SERVICE="prod.service"
-            JAR_FILE="app.jar"
-            echo "== Production deploy start =="
+            [Service]
+            User=${{ secrets.EC2_USER }}
+            WorkingDirectory=/opt/app/production
+            ExecStart=/usr/bin/java -jar /opt/app/production/app.jar
+            SuccessExitStatus=143
+            Restart=on-failure
+            RestartSec=10
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
             
-            # List app contents for debug
-            echo "=== Contents of $HOME/app ==="
-            ls -la "$HOME/app"
-            echo "=== Contents of $HOME/app/frontend ==="
-            ls -la "$HOME/app/frontend"
-            echo "=== Contents of $HOME/app/backend ==="
-            ls -la "$HOME/app/backend"
-            echo "=== Contents of $HOME/app/frontend/build ==="
-            ls -la "$HOME/app/frontend/build"
-            
-            # Check directories exist
-            if [ ! -d "$HOME/app/frontend" ]; then
-                echo "ERROR: frontend directory not found"
-                ls -la "$HOME/app"
-                exit 1
-            fi
-            
-            if [ ! -d "$HOME/app/backend" ]; then
-                echo "ERROR: backend directory not found"
-                ls -la "$HOME/app"
-                exit 1
-            fi
-            
-            # Check if frontend build exists
-            if [ ! -d "$HOME/app/frontend/build" ]; then
-                echo "ERROR: frontend build directory not found"
-                ls -la "$HOME/app/frontend"
-                exit 1
-            fi
-            
-            # Check if index.html exists in build
-            if [ ! -f "$HOME/app/frontend/build/index.html" ]; then
-                echo "ERROR: index.html not found in build directory"
-                ls -la "$HOME/app/frontend/build"
-                exit 1
-            fi
-            
-            # Frontend deployment
-            sudo rm -rf "$NGINX_ROOT"/*
-            sudo cp -r "$HOME/app/frontend/build"/* "$NGINX_ROOT"/
-            sudo chown -R www-data:www-data "$NGINX_ROOT"
-            
-            # Verify frontend files
-            if [ ! -f "$NGINX_ROOT/index.html" ]; then
-                echo "ERROR: index.html not found in $NGINX_ROOT"
-                ls -la "$NGINX_ROOT"
-                exit 1
-            fi
-            
-            # Backend deployment
-            if [ -f "$HOME/app/backend"/*.jar ]; then
-                cp "$HOME/app/backend"/*.jar "$HOME/$JAR_FILE"
-                echo "JAR copied successfully to $JAR_FILE"
-            else
-                echo "ERROR: JAR file not found"
-                ls -la "$HOME/app/backend"
-                exit 1
-            fi
-            
-            # Check if systemd service exists
-            if [ ! -f "/etc/systemd/system/${PROD_SERVICE}" ]; then
-                echo "ERROR: Systemd service ${PROD_SERVICE} not found"
-                ls -la /etc/systemd/system/
-                exit 1
-            fi
+            # Reload systemd
+            sudo systemctl daemon-reload
             
             # Restart services
+            echo "8. Restarting services..."
             sudo systemctl restart nginx
-            sudo systemctl restart ${PROD_SERVICE}
+            sudo systemctl restart production
             
             # Wait for services to start
-            sleep 3
+            echo "9. Waiting for services to start..."
+            sleep 30
+            
+            # Verify deployment
+            echo "10. Verifying deployment..."
+            ls -la /var/www/html/
+            ls -la /opt/app/production/
             
             # Check service status
-            sudo systemctl status ${PROD_SERVICE} --no-pager -n 20
+            echo "11. Checking service status..."
+            sudo systemctl status production --no-pager -n 20
             
             # Test production site
-            echo "=== Testing production site ==="
+            echo "12. Testing production site..."
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/)
             echo "HTTP Status Code: $HTTP_CODE"
             
             if [ "$HTTP_CODE" = "200" ]; then
-                echo "✓ Production site is accessible"
-                CONTENT=$(curl -s http://localhost/)
-                if [ -z "$CONTENT" ]; then
-                    echo "⚠ Warning: Production site returned empty content"
-                else
-                    echo "✓ Production site has content"
-                    echo "First 100 characters:"
-                    echo "$CONTENT" | head -c 100
-                fi
+              echo "✓ Production site is accessible"
             else
-                echo "✗ Production site returned HTTP $HTTP_CODE"
-                echo "=== Nginx error logs ==="
-                sudo tail -n 30 /var/log/nginx/error.log
+              echo "✗ Production site returned HTTP $HTTP_CODE"
+              echo "=== Nginx error logs ==="
+              sudo tail -n 30 /var/log/nginx/error.log
             fi
             
             # Test backend API
-            echo "=== Testing backend API ==="
+            echo "13. Testing backend API..."
             API_HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/actuator/health || curl -s -o /dev/null -w "%{http_code}" http://localhost/api/health)
             echo "API HTTP Status Code: $API_HTTP_CODE"
             
-            echo "== Production deploy done =="
-            echo "Production URLs:"
-            echo "  Frontend: https://banking.cyetechnology.com"
-            echo "  Backend API: https://banking.cyetechnology.com/api"
+            echo "=== Production Deployment Completed ==="
