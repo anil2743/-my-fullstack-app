@@ -10,21 +10,20 @@ import NomineeDetails from "./auth/NomineeDetails";
 import UploadDocuments from "./auth/UploadDocuments";
 
 function App() {
+  // Check if we're in staging environment
+  const isStaging = window.location.pathname.includes('/staging');
+  const basename = isStaging ? '/staging' : '';
+
   return (
-    <Router basename="/staging">
+    <Router basename={basename}>
       <Routes>
-
-        {/* ✅ This line FIXES staging blank screen */}
         <Route index element={<PersonalDetails />} />
-
-        {/* ✅ All normal routes */}
         <Route path="personal-details" element={<PersonalDetails />} />
         <Route path="contact-details" element={<ContactDetails />} />
         <Route path="bank-tax-details" element={<BankTaxDetails />} />
         <Route path="scheme-selection" element={<SchemeSelection />} />
         <Route path="nominee-details" element={<NomineeDetails />} />
         <Route path="upload-documents" element={<UploadDocuments />} />
-
       </Routes>
     </Router>
   );
