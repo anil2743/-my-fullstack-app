@@ -1,8 +1,9 @@
 import axios from "axios";
 
+// Use protocol-relative URL to avoid mixed content issues
 const base = window.location.href.includes("/staging")
-    ? "http://65.1.231.237/staging/api"                  // STAGING
-    : "https://banking.cyetechnology.com/api";          // PRODUCTION
+    ? "//65.1.231.237/staging/api"                  // STAGING (protocol-relative)
+    : "https://banking.cyetechnology.com/api";      // PRODUCTION
 
 const api = axios.create({
     baseURL: base,
