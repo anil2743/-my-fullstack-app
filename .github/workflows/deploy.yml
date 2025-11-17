@@ -1,45 +1,13 @@
-name: CI/CD Deploy React + Spring Boot to EC2 (Staging & Prod)
+name: CI/CD Deploy React + Spring Boot to EC2 (Production)
 
 on:
   push:
-    branches: [ staging, main, master ]
-  pull_request:
-    branches: [ staging ]
+    branches: [ main, master ]
 
 jobs:
   build:
-    name: Build backend
+    name: Build frontend & backend
     runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Build Backend (Spring Boot)
-        run: |
-          cd backend
-          mvn -B -q -DskipTests clean package
-      - name: Upload backend artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-jar
-          path: |
-            backend/target/*.jar
-  deploy-staging:
-    name: Deploy to STAGING EC2
-    needs: build
-    runs-on: ubuntu-latest
-    if: >
-      (github.ref == 'refs/heads/staging' && github.event_name == 'push') ||
-      (github.event_name == 'pull_request' && github.base_ref == 'staging' && 
-       github.event.pull_request.head.repo.full_name == github.repository)
-    environment: staging
 
     steps:
       - name: Checkout repo
@@ -50,128 +18,31 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Download backend artifact
-        uses: actions/download-artifact@v4
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
         with:
-          name: backend-jar
-          path: ./build-artifacts
+          distribution: temurin
+          java-version: '17'
 
-      - name: Build Frontend (Staging)
+      - name: Build Frontend (React)
         run: |
           cd frontend
           npm ci
-          CI=false npm run build:staging
+          CI=false npm run build
 
-      - name: Prepare artifacts
+      - name: Build Backend (Spring Boot)
         run: |
-          mkdir -p build-artifacts/frontend
-          cp -r frontend/build build-artifacts/frontend/
+          cd backend
+          mvn -B -q -DskipTests clean package
 
-      - name: List artifacts
-        run: ls -laR ./build-artifacts
-
-      - name: Copy to EC2 (staging)
-        uses: appleboy/scp-action@v0.1.7
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: "build-artifacts"
-          target: "/home/${{ secrets.EC2_USER }}/staging/"
+          name: site-and-jar
+          path: |
+            frontend/build
+            backend/target/*.jar
 
-      - name: Deploy on EC2 (staging)
-        uses: appleboy/ssh-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            set -e
-            NGINX_ROOT="/var/www/html"
-            STAGING_DIR="$NGINX_ROOT/staging"
-            SPRING_SERVICE="springboot-staging"
-            JAR_FILE="app-staging.jar"
-            echo "== Staging deploy start =="
-            # Debug: List the contents of the staging directory
-            echo "Contents of ~/staging:"
-            ls -la ~/staging
-            echo "Contents of ~/staging/build-artifacts:"
-            ls -la ~/staging/build-artifacts
-            echo "Contents of ~/staging/build-artifacts/frontend:"
-            ls -la ~/staging/build-artifacts/frontend
-            # Frontend
-            sudo mkdir -p "$STAGING_DIR"
-            sudo rm -rf "$STAGING_DIR"/*
-            sudo cp -r ~/staging/build-artifacts/frontend/build/* "$STAGING_DIR"/
-            sudo chown -R www-data:www-data "$STAGING_DIR"
-            
-            # Backend
-            mkdir -p ~/staging/backend
-            cp ~/staging/build-artifacts/backend/target/*.jar ~/staging/$JAR_FILE
-            # Create systemd service if missing
-            if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
-              sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
-            [Unit]
-            Description=Spring Boot (staging)
-            After=network.target
-            [Service]
-            User=${{ secrets.EC2_USER }}
-            WorkingDirectory=/home/${{ secrets.EC2_USER }}/staging
-            ExecStart=/usr/bin/java -jar $JAR_FILE --server.port=8081
-            SuccessExitStatus=143
-            Restart=always
-            RestartSec=5
-            [Install]
-            WantedBy=multi-user.target
-            EOF
-              sudo systemctl daemon-reload
-              sudo systemctl enable ${SPRING_SERVICE}
-            fi
-            # Configure Nginx for staging
-            sudo tee /etc/nginx/sites-available/staging > /dev/null <<EOF
-            server {
-                listen 80 default_server;
-                server_name _;
-
-                # ============================
-                # STAGING API
-                # ============================
-                location ^~ /staging/api/ {
-                    proxy_pass http://127.0.0.1:8081;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                }
-
-                # ============================
-                # FIX: EXACT MATCH /staging → redirect to /staging/
-                # ============================
-                location = /staging {
-                    return 302 /staging/;
-                }
-
-                # ============================
-                # STAGING FRONTEND
-                # ============================
-                location ^~ /staging/ {
-                    alias /var/www/html/staging/;
-                    try_files \$uri \$uri/ /staging/index.html;
-                }
-            }
-            EOF
-            
-            # Enable staging site
-            if [ ! -L "/etc/nginx/sites-enabled/staging" ]; then
-              sudo ln -s /etc/nginx/sites-available/staging /etc/nginx/sites-enabled/
-            fi
-            
-            sudo systemctl restart nginx
-            sudo systemctl restart ${SPRING_SERVICE}
-            sudo systemctl status ${SPRING_SERVICE} --no-pager -n 20
-            echo "== Staging deploy done =="
-            echo "Staging URLs:"
-            echo "  Frontend: http://${{ secrets.EC2_HOST }}/staging"
-            echo "  Backend API: http://${{ secrets.EC2_HOST }}/staging/api"
   deploy-production:
     name: Deploy to PRODUCTION EC2
     needs: build
@@ -180,32 +51,13 @@ jobs:
     environment: production
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Download backend artifact
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          name: backend-jar
+          name: site-and-jar
           path: ./build-artifacts
 
-      - name: Build Frontend (Production)
-        run: |
-          cd frontend
-          npm ci
-          CI=false npm run build:production
-
-      - name: Prepare artifacts
-        run: |
-          mkdir -p build-artifacts/frontend
-          cp -r frontend/build build-artifacts/frontend/
-
-      - name: List artifacts
+      - name: List downloaded files
         run: ls -laR ./build-artifacts
 
       - name: Copy to EC2 (prod)
@@ -223,12 +75,14 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: DB_URL,DB_USERNAME,DB_PASSWORD,AES_KEY,JWT_SECRET,ENCRYPTION_KEY
           script: |
             set -e
             NGINX_ROOT="/var/www/html"
             SPRING_SERVICE="springboot"
             JAR_FILE="app.jar"
             echo "== Production deploy start =="
+            
             # Debug: List the contents of the app directory
             echo "Contents of ~/app:"
             ls -la ~/app
@@ -236,28 +90,22 @@ jobs:
             ls -la ~/app/build-artifacts
             echo "Contents of ~/app/build-artifacts/frontend:"
             ls -la ~/app/build-artifacts/frontend
-            # Frontend - IMPORTANT: Preserve staging directory
-            # Create a temporary backup of staging directory
-            if [ -d "$NGINX_ROOT/staging" ]; then
-              echo "Backing up staging directory"
-              sudo cp -r "$NGINX_ROOT/staging" /tmp/staging-backup
-            fi
+            echo "Contents of ~/app/build-artifacts/frontend/build:"
+            ls -la ~/app/build-artifacts/frontend/build
             
-            # Remove all files in NGINX_ROOT except staging directory
-            sudo find "$NGINX_ROOT" -mindepth 1 -maxdepth 1 ! -name staging -exec rm -rf {} +
-            
-            # Restore staging directory if it existed
-            if [ -d /tmp/staging-backup ]; then
-              echo "Restoring staging directory"
-              sudo mv /tmp/staging-backup "$NGINX_ROOT/staging"
-            fi
-            
-            # Copy the production build
+            # Frontend
+            sudo mkdir -p "$NGINX_ROOT"
+            sudo rm -rf "$NGINX_ROOT"/*
             sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
             sudo chown -R www-data:www-data "$NGINX_ROOT"
             
+            # Verify files were copied
+            echo "Contents of $NGINX_ROOT after copy:"
+            ls -la "$NGINX_ROOT"
+            
             # Backend
             cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
+            
             # Create systemd service if missing
             if [ ! -f "/etc/systemd/system/${SPRING_SERVICE}.service" ]; then
               sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
@@ -267,7 +115,13 @@ jobs:
             [Service]
             User=${{ secrets.EC2_USER }}
             WorkingDirectory=/home/${{ secrets.EC2_USER }}/app
-            ExecStart=/usr/bin/java -jar $JAR_FILE --server.port=8080
+            Environment="DB_URL=${DB_URL}"
+            Environment="DB_USERNAME=${DB_USERNAME}"
+            Environment="DB_PASSWORD=${DB_PASSWORD}"
+            Environment="AES_KEY=${AES_KEY}"
+            Environment="JWT_SECRET=${JWT_SECRET}"
+            Environment="ENCRYPTION_KEY=${ENCRYPTION_KEY}"
+            ExecStart=/usr/bin/java -jar $JAR_FILE --spring.profiles.active=prod
             SuccessExitStatus=143
             Restart=always
             RestartSec=5
@@ -276,35 +130,47 @@ jobs:
             EOF
               sudo systemctl daemon-reload
               sudo systemctl enable ${SPRING_SERVICE}
+            else
+              # Update environment variables in existing service
+              sudo sed -i "s|^Environment=.*||g" /etc/systemd/system/${SPRING_SERVICE}.service
+              sudo sed -i "/\[Service\]/a Environment=\"DB_URL=${DB_URL}\"" /etc/systemd/system/${SPRING_SERVICE}.service
+              sudo sed -i "/\[Service\]/a Environment=\"DB_USERNAME=${DB_USERNAME}\"" /etc/systemd/system/${SPRING_SERVICE}.service
+              sudo sed -i "/\[Service\]/a Environment=\"DB_PASSWORD=${DB_PASSWORD}\"" /etc/systemd/system/${SPRING_SERVICE}.service
+              sudo sed -i "/\[Service\]/a Environment=\"AES_KEY=${AES_KEY}\"" /etc/systemd/system/${SPRING_SERVICE}.service
+              sudo sed -i "/\[Service\]/a Environment=\"JWT_SECRET=${JWT_SECRET}\"" /etc/systemd/system/${SPRING_SERVICE}.service
+              sudo sed -i "/\[Service\]/a Environment=\"ENCRYPTION_KEY=${ENCRYPTION_KEY}\"" /etc/systemd/system/${SPRING_SERVICE}.service
+              sudo systemctl daemon-reload
             fi
-            # Configure Nginx for production
+            
+            # Configure Nginx for production with SSL
             sudo tee /etc/nginx/sites-available/banking > /dev/null <<EOF
             server {
+                listen 80;
+                server_name banking.cyetechnology.com;
+                return 301 https://\$host\$request_uri;
+            }
+
+            server {
+                listen 443 ssl;
                 server_name banking.cyetechnology.com;
 
+                ssl_certificate /etc/letsencrypt/live/banking.cyetechnology.com/fullchain.pem;
+                ssl_certificate_key /etc/letsencrypt/live/banking.cyetechnology.com/privkey.pem;
+                include /etc/letsencrypt/options-ssl-nginx.conf;
+                ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
                 location / {
-                    root /var/www/html;
+                    root $NGINX_ROOT;
                     try_files \$uri \$uri/ /index.html;
                 }
 
-                location ^~ /api/ {
-                    proxy_pass http://127.0.0.1:8080;
+                location /api {
+                    proxy_pass http://localhost:8080/api;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto \$scheme;
                 }
-
-                listen 443 ssl; # managed by Certbot
-                ssl_certificate /etc/letsencrypt/live/banking.cyetechnology.com/fullchain.pem; # managed by Certbot
-                ssl_certificate_key /etc/letsencrypt/live/banking.cyetechnology.com/privkey.pem; # managed by Certbot
-                include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
-                ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
-            }
-            server {
-                if (\$host = banking.cyetechnology.com) {
-                    return 301 https://\$host\$request_uri;
-                } # managed by Certbot
-
-                listen 80;
-                server_name banking.cyetechnology.com;
-                return 404; # managed by Certbot
             }
             EOF
             
