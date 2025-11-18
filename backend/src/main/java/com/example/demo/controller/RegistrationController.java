@@ -14,7 +14,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/registration")
+@RequestMapping("/api")  // Changed from "/api/registration" to "/api"
 public class RegistrationController {
 
     private static final Logger logger = LoggerFactory.getLogger(RegistrationController.class);
@@ -22,7 +22,7 @@ public class RegistrationController {
     @Autowired
     private RegistrationService registrationService;
 
-    // NEW: Add this for /check-pan (fixes 404)
+    // This endpoint is now at /api/check-pan
     @PostMapping("/check-pan")
     public ResponseEntity<?> checkPan(@RequestBody Map<String, String> request) {
         try {
@@ -38,6 +38,7 @@ public class RegistrationController {
         }
     }
 
+    // This endpoint is now at /api/personal-details
     @PostMapping("/personal-details")
     public ResponseEntity<?> savePersonalDetails(@RequestBody @Validated PersonalDetailsDto personalDetailsDto, @RequestParam(required = false) Long userId) {
         try {
@@ -63,6 +64,7 @@ public class RegistrationController {
         }
     }
 
+    // This endpoint is now at /api/personal-details
     @GetMapping("/personal-details")
     public ResponseEntity<?> getPersonalDetails(@RequestParam Long userId) {
         try {
@@ -77,6 +79,7 @@ public class RegistrationController {
         }
     }
 
+    // This endpoint is now at /api/check-duplicates
     @PostMapping("/check-duplicates")
     public ResponseEntity<?> checkDuplicates(@RequestBody Map<String, String> request) {
         Map<String, String> errors = new HashMap<>();
@@ -117,6 +120,7 @@ public class RegistrationController {
         return ResponseEntity.ok(response);
     }
 
+    // This endpoint is now at /api/contact-details
     @PostMapping("/contact-details")
     public ResponseEntity<?> saveContactDetails(@RequestBody @Validated ContactDetailsDto contactDetailsDto, @RequestParam Long userId) {
         try {
@@ -134,6 +138,7 @@ public class RegistrationController {
         }
     }
 
+    // This endpoint is now at /api/contact-details
     @GetMapping("/contact-details")
     public ResponseEntity<?> getContactDetails(@RequestParam Long userId) {
         try {
@@ -148,6 +153,7 @@ public class RegistrationController {
         }
     }
 
+    // This endpoint is now at /api/bank-tax-details
     @PostMapping("/bank-tax-details")
     public ResponseEntity<?> saveBankTaxDetails(@RequestBody @Validated BankTaxDetailsDto bankTaxDetailsDto, @RequestParam Long userId) {
         try {
@@ -165,6 +171,7 @@ public class RegistrationController {
         }
     }
 
+    // This endpoint is now at /api/bank-tax-details
     @GetMapping("/bank-tax-details")
     public ResponseEntity<?> getBankTaxDetails(@RequestParam Long userId) {
         try {
@@ -179,12 +186,14 @@ public class RegistrationController {
         }
     }
 
+    // This endpoint is now at /api/scheme-selection
     @PostMapping("/scheme-selection")
     public ResponseEntity<Long> saveSchemeSelection(@RequestBody SchemeSelectionDto schemeSelectionDto, @RequestParam Long userId) {
         Long savedUserId = registrationService.saveSchemeSelection(schemeSelectionDto, userId);
         return ResponseEntity.ok(savedUserId);
     }
 
+    // This endpoint is now at /api/scheme-selection
     @GetMapping("/scheme-selection")
     public ResponseEntity<?> getSchemeSelection(@RequestParam Long userId) {
         try {
@@ -199,12 +208,14 @@ public class RegistrationController {
         }
     }
 
+    // This endpoint is now at /api/nominee-details
     @PostMapping("/nominee-details")
     public ResponseEntity<Long> saveNomineeDetails(@RequestBody NomineeDetailsDto nomineeDetailsDto, @RequestParam Long userId) {
         Long savedUserId = registrationService.saveNomineeDetails(nomineeDetailsDto, userId);
         return ResponseEntity.ok(savedUserId);
     }
 
+    // This endpoint is now at /api/nominee-details
     @GetMapping("/nominee-details")
     public ResponseEntity<?> getNomineeDetails(@RequestParam Long userId) {
         try {
@@ -219,6 +230,7 @@ public class RegistrationController {
         }
     }
 
+    // This endpoint is now at /api/upload-documents
     @PostMapping("/upload-documents")
     public ResponseEntity<Long> saveUploadDocuments(@RequestBody UploadDocumentsDto uploadDocumentsDto, @RequestParam Long userId) {
         Long savedUserId = registrationService.saveUploadDocuments(uploadDocumentsDto, userId);
@@ -227,6 +239,7 @@ public class RegistrationController {
         return ResponseEntity.ok(savedUserId);
     }
 
+    // This endpoint is now at /api/upload-documents
     @GetMapping("/upload-documents")
     public ResponseEntity<?> getUploadDocuments(@RequestParam Long userId) {
         try {
@@ -241,6 +254,7 @@ public class RegistrationController {
         }
     }
 
+    // This endpoint is now at /api/user-status
     @GetMapping("/user-status")
     public ResponseEntity<?> getUserStatus(@RequestParam Long userId) {
         try {
