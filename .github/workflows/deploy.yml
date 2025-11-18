@@ -76,8 +76,8 @@ jobs:
             set -e
             DOMAIN="banking.cyetechnology.com"
             NGINX_ROOT="/var/www/html"
-            SPRING_SERVICE="springboot"
-            JAR_FILE="app.jar"
+            SPRING_SERVICE="banking-api"
+            JAR_FILE="banking-app.jar"
             SSL_CERT="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
             SSL_KEY="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
             
@@ -92,21 +92,32 @@ jobs:
             sudo mkdir -p "$NGINX_ROOT"
             sudo rm -rf "$NGINX_ROOT"/*
             sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
+            
+            # Fix permissions
             sudo chown -R www-data:www-data "$NGINX_ROOT"
+            sudo chmod -R 755 "$NGINX_ROOT"
+            sudo find "$NGINX_ROOT" -type d -exec chmod 755 {} \;
+            sudo find "$NGINX_ROOT" -type f -exec chmod 644 {} \;
+            
+            # Verify files
+            echo "Contents of $NGINX_ROOT:"
+            ls -la "$NGINX_ROOT"
+            echo "Contents of $NGINX_ROOT/static:"
+            ls -la "$NGINX_ROOT/static" 2>/dev/null || echo "No static directory"
             
             # Backend deployment
-            mkdir -p ~/app
-            cp ~/app/build-artifacts/backend/target/*.jar ~/app/$JAR_FILE
+            mkdir -p ~/banking-app
+            cp ~/app/build-artifacts/backend/target/*.jar ~/banking-app/$JAR_FILE
             
-            # Create systemd service
+            # Create or update systemd service
             sudo tee /etc/systemd/system/${SPRING_SERVICE}.service > /dev/null <<EOF
             [Unit]
-            Description=Spring Boot Production
+            Description=Banking API Service
             After=network.target
             [Service]
             User=${{ secrets.EC2_USER }}
-            WorkingDirectory=/home/${{ secrets.EC2_USER }}/app
-            ExecStart=/usr/bin/java -jar $JAR_FILE --server.port=8080
+            WorkingDirectory=/home/${{ secrets.EC2_USER }}/banking-app
+            ExecStart=/usr/bin/java -jar $JAR_FILE
             SuccessExitStatus=143
             Restart=always
             RestartSec=5
@@ -116,6 +127,7 @@ jobs:
             
             sudo systemctl daemon-reload
             sudo systemctl enable ${SPRING_SERVICE}
+            sudo systemctl restart ${SPRING_SERVICE}
             
             # Configure Nginx with SSL
             sudo tee /etc/nginx/sites-available/production > /dev/null <<EOF
@@ -132,11 +144,14 @@ jobs:
                 ssl_certificate $SSL_CERT;
                 ssl_certificate_key $SSL_KEY;
                 ssl_protocols TLSv1.2 TLSv1.3;
-                ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384;
+                ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
                 ssl_prefer_server_ciphers off;
                 ssl_session_cache shared:SSL:10m;
                 ssl_session_timeout 1d;
                 ssl_session_tickets off;
+                
+                root $NGINX_ROOT;
+                index index.html;
                 
                 # Security headers
                 add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
@@ -145,13 +160,15 @@ jobs:
                 add_header X-XSS-Protection "1; mode=block" always;
                 add_header Referrer-Policy "strict-origin-when-cross-origin" always;
                 
-                root $NGINX_ROOT;
-                index index.html;
-                
+                # Handle React Router
                 location / {
                     try_files \$uri \$uri/ /index.html;
+                    expires -1;
+                    add_header Cache-Control "no-cache, no-store, must-revalidate";
+                    add_header Pragma "no-cache";
                 }
                 
+                # API proxy to Spring Boot
                 location /api {
                     proxy_pass http://localhost:8080/api;
                     proxy_set_header Host \$host;
@@ -164,6 +181,12 @@ jobs:
                     proxy_send_timeout 60s;
                     proxy_read_timeout 60s;
                 }
+                
+                # Static files with caching
+                location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+                    expires 1y;
+                    add_header Cache-Control "public, immutable";
+                }
             }
             EOF
             
@@ -174,7 +197,6 @@ jobs:
             # Test and restart services
             sudo nginx -t
             sudo systemctl restart nginx
-            sudo systemctl restart ${SPRING_SERVICE}
             
             echo "== Production deploy done =="
             echo "Production URLs:"
