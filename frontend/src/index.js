@@ -10,7 +10,7 @@ import UploadDocuments from "./auth/UploadDocuments";
 
 function App() {
   return (
-    <Router basename={process.env.PUBLIC_URL}>
+    <Router basename="/">
       <Routes>
         <Route index element={<PersonalDetails />} />
         <Route path="personal-details" element={<PersonalDetails />} />

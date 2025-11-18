@@ -99,6 +99,9 @@ jobs:
             sudo find "$NGINX_ROOT" -type d -exec chmod 755 {} \;
             sudo find "$NGINX_ROOT" -type f -exec chmod 644 {} \;
             
+            # Replace %PUBLIC_URL% with empty string in all files
+            find "$NGINX_ROOT" -type f -exec sed -i 's|%PUBLIC_URL%||g' {} \;
+            
             # Verify files
             echo "Contents of $NGINX_ROOT:"
             ls -la "$NGINX_ROOT"
