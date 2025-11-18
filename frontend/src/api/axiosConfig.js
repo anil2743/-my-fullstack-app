@@ -1,10 +1,9 @@
 import axios from 'axios';
 
 const api = axios.create({
-    baseURL: '/api',  // Changed: Relative path—proxied by nginx to backend
+    baseURL: '/api', // Proxied through Nginx
 });
 
-// Interceptor to add JWT to every request
 api.interceptors.request.use(config => {
     const token = localStorage.getItem('authToken');
     if (token) {
