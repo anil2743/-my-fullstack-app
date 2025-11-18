@@ -1,27 +1,20 @@
-import React from "react";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
+import './index.css';
+import App from './App';
+import reportWebVitals from './reportWebVitals';
 
-import PersonalDetails from "./auth/PersonalDetails";
-import ContactDetails from "./auth/ContactDetails";
-import BankTaxDetails from "./auth/BankTaxDetails";
-import SchemeSelection from "./auth/SchemeSelection";
-import NomineeDetails from "./auth/NomineeDetails";
-import UploadDocuments from "./auth/UploadDocuments";
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+  <React.StrictMode>
+    <BrowserRouter basename="/">
+      <App />
+    </BrowserRouter>
+  </React.StrictMode>
+);
 
-function App() {
-  return (
-    <Router basename="/">
-      <Routes>
-        <Route index element={<PersonalDetails />} />
-        <Route path="personal-details" element={<PersonalDetails />} />
-        <Route path="contact-details" element={<ContactDetails />} />
-        <Route path="bank-tax-details" element={<BankTaxDetails />} />
-        <Route path="scheme-selection" element={<SchemeSelection />} />
-        <Route path="nominee-details" element={<NomineeDetails />} />
-        <Route path="upload-documents" element={<UploadDocuments />} />
-      </Routes>
-    </Router>
-  );
-}
-
-export default App;
+// If you want to start measuring performance in your app, pass a function
+// to log results (for example: reportWebVitals(console.log))
+// or send to an analytics endpoint. Learn more: https://bit.ly/CRA-vitals
+reportWebVitals();

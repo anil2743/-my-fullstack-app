@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-    baseURL: '/api',  // This will be proxied by nginx to backend
+    baseURL: '/api',  // Changed: Relative path—proxied by nginx to backend
 });
 
 // Interceptor to add JWT to every request

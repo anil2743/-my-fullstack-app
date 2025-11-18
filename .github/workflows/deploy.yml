@@ -88,10 +88,21 @@ jobs:
             sudo rm -rf /etc/nginx/sites-enabled/staging 2>/dev/null || true
             sudo rm -rf /etc/nginx/sites-available/staging 2>/dev/null || true
             
+            # Create a temporary directory for processing
+            TEMP_DIR=$(mktemp -d)
+            
             # Frontend deployment
             sudo mkdir -p "$NGINX_ROOT"
             sudo rm -rf "$NGINX_ROOT"/*
-            sudo cp -r ~/app/build-artifacts/frontend/build/* "$NGINX_ROOT"/
+            
+            # Copy the built React app to the temporary directory
+            cp -r ~/app/build-artifacts/frontend/build/* "$TEMP_DIR/"
+            
+            # Replace %PUBLIC_URL% with empty string in all files in the temporary directory
+            find "$TEMP_DIR" -type f -exec sed -i 's|%PUBLIC_URL%||g' {} \;
+            
+            # Copy the processed files to the web root
+            sudo cp -r "$TEMP_DIR"/* "$NGINX_ROOT/"
             
             # Fix permissions
             sudo chown -R www-data:www-data "$NGINX_ROOT"
@@ -99,8 +110,8 @@ jobs:
             sudo find "$NGINX_ROOT" -type d -exec chmod 755 {} \;
             sudo find "$NGINX_ROOT" -type f -exec chmod 644 {} \;
             
-            # Replace %PUBLIC_URL% with empty string in all files
-            find "$NGINX_ROOT" -type f -exec sed -i 's|%PUBLIC_URL%||g' {} \;
+            # Clean up temporary directory
+            rm -rf "$TEMP_DIR"
             
             # Verify files
             echo "Contents of $NGINX_ROOT:"
